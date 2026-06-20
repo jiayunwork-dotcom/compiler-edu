@@ -149,6 +149,11 @@ export function computeFirst(productions) {
     for (let i = 0; i < symbols.length; i++) {
       const sym = symbols[i];
       const fs = first.get(sym);
+      if (!fs) {
+        result.add(sym);
+        allHaveEpsilon = false;
+        break;
+      }
       for (const s of fs) {
         if (s !== EPSILON) result.add(s);
       }
@@ -390,6 +395,10 @@ function generateLeftFactoringSuggestions(nonTerminal, entries, terminal) {
   const suggestions = [];
   const bodies = entries.map(e => e.body.length === 0 ? [EPSILON] : e.body);
   
+  if (bodies.length < 2) {
+    return ['需要至少两个产生式才能进行左因子提取分析。'];
+  }
+  
   const prefixMap = new Map();
   for (const body of bodies) {
     const prefix = body.length > 0 ? body[0] : EPSILON;
@@ -399,6 +408,15 @@ function generateLeftFactoringSuggestions(nonTerminal, entries, terminal) {
   
   const commonPrefixes = [];
   const maxLen = Math.min(...bodies.map(b => b.length));
+  
+  if (maxLen <= 0) {
+    suggestions.push(
+      `【消除公共前缀】以下产生式对输入 "${terminal}" 存在歧义，需要提取左因子或改写：`,
+      ...entries.map(e => `  · ${e.head} → ${e.body.length === 0 ? EPSILON : e.body.join(' ')}`)
+    );
+    return suggestions;
+  }
+  
   for (let len = 1; len <= maxLen; len++) {
     const prefixGroups = new Map();
     for (const body of bodies) {
@@ -459,11 +477,17 @@ function generateFirstFollowSuggestions(nonTerminal, terminal, entries, first, f
     );
   }
   
-  const followSet = [...follow.get(nonTerminal)].join(', ');
-  suggestions.push(
-    `【诊断信息】Follow(${nonTerminal}) = {${followSet}}`,
-    `  终结符 "${terminal}" 同时出现在某产生式的First集和Follow集中。`
-  );
+  const followSet = follow.get(nonTerminal);
+  if (followSet) {
+    suggestions.push(
+      `【诊断信息】Follow(${nonTerminal}) = {${[...followSet].join(', ')}}`,
+      `  终结符 "${terminal}" 同时出现在某产生式的First集和Follow集中。`
+    );
+  } else {
+    suggestions.push(
+      `【诊断信息】无法获取 Follow(${nonTerminal})，可能存在文法定义问题。`
+    );
+  }
   
   return suggestions;
 }

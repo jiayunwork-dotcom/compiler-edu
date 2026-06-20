@@ -71,6 +71,14 @@
     }
   }
   
+  function hasDifferences() {
+    if (defaultTokens.length !== tokens.length) return true;
+    for (let i = 0; i < defaultTokens.length; i++) {
+      if (!tokensEqual(defaultTokens[i], tokens[i])) return true;
+    }
+    return false;
+  }
+  
   function startStepping() {
     stepper = createLexerStepper(sourceCode, rules);
     stepPos = 0;
@@ -103,14 +111,22 @@
   
   function addRule() {
     rules = [...rules, { regex: '', type: '标识符', label: '新规则' }];
+    analyze();
   }
   
   function removeRule(idx) {
     rules = rules.filter((_, i) => i !== idx);
+    analyze();
   }
   
   function updateRule(idx, field, value) {
     rules = rules.map((r, i) => i === idx ? { ...r, [field]: value } : r);
+    analyze();
+  }
+  
+  function resetRules() {
+    rules = JSON.parse(JSON.stringify(DEFAULT_RULES));
+    analyze();
   }
   
   onMount(() => {
@@ -204,7 +220,10 @@
         <div class="panel">
           <div class="panel-title">
             <h3>词法规则 (正则 → Token类型)</h3>
-            <button class="primary" on:click={addRule}>+ 添加规则</button>
+            <div class="rule-actions">
+              <button on:click={resetRules}>重置规则</button>
+              <button class="primary" on:click={addRule}>+ 添加规则</button>
+            </div>
           </div>
           <div class="rules-list">
             {#each rules as rule, idx}
@@ -215,7 +234,7 @@
                   placeholder="正则表达式"
                   on:input={(e) => updateRule(idx, 'regex', e.target.value)}
                 />
-                <select on:change={(e) => updateRule(idx, 'type', e.target.value)}>
+                <select value={rule.type} on:change={(e) => updateRule(idx, 'type', e.target.value)}>
                   {#each Object.values(TOKEN_TYPES) as tt}
                     <option value={tt}>{tt}</option>
                   {/each}
@@ -258,7 +277,13 @@
         <div class="panel">
           <div class="panel-title">
             <h3>Token对比 - 默认规则 vs 自定义规则</h3>
-            <span class="muted">黄色高亮 = 存在差异</span>
+            {#if hasDifferences()}
+              <span class="badge badge-string" style="background:#fef9c3;color:#854d0e">
+                检测到差异
+              </span>
+            {:else}
+              <span class="muted">当前无差异，请修改左侧自定义规则</span>
+            {/if}
           </div>
           <div class="compare-container">
             <div class="compare-column">
@@ -460,6 +485,11 @@
   .rules-list {
     display: flex;
     flex-direction: column;
+    gap: 8px;
+  }
+  
+  .rule-actions {
+    display: flex;
     gap: 8px;
   }
   
