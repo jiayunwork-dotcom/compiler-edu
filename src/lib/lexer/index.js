@@ -13,7 +13,7 @@ function escapeRegExp(str) {
 
 function buildRegexForRule(rule) {
   try {
-    return new RegExp('^' + rule.regex);
+    return new RegExp('^(?:' + rule.regex + ')');
   } catch (e) {
     console.error('无效正则:', rule.regex, e);
     return null;

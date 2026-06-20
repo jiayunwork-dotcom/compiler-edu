@@ -16,6 +16,32 @@
   let dfaStepIndex = 0;
   let minStepIndex = 0;
   
+  $: currentStates = (() => {
+    if (phase === 'nfa' && nfaResult) {
+      const step = nfaResult.steps[Math.min(nfaStepIndex, nfaResult.steps.length - 1)];
+      if (step.nfa) return [...getAllStates(step.nfa.start)];
+      return [...getAllStates(nfaResult.nfa.start)];
+    }
+    if (phase === 'dfa' && dfaResult) {
+      return [...getAllStates(dfaResult.dfa)];
+    }
+    if (phase === 'min' && minResult) {
+      return [...getAllStates(minResult.dfa)];
+    }
+    return [];
+  })();
+  
+  $: currentStartState = (() => {
+    if (phase === 'nfa' && nfaResult) {
+      const step = nfaResult.steps[Math.min(nfaStepIndex, nfaResult.steps.length - 1)];
+      if (step.nfa) return step.nfa.start;
+      return nfaResult.nfa.start;
+    }
+    if (phase === 'dfa' && dfaResult) return dfaResult.dfa;
+    if (phase === 'min' && minResult) return minResult.dfa;
+    return null;
+  })();
+  
   function convert() {
     try {
       nfaResult = buildNFAWithSteps(regex);
@@ -44,22 +70,22 @@
     phase = 'min';
   }
   
-  function getCurrentStates() {
+  function computeCurrentStates() {
     if (phase === 'nfa' && nfaResult) {
       const step = nfaResult.steps[Math.min(nfaStepIndex, nfaResult.steps.length - 1)];
-      if (step.nfa) return getAllStates(step.nfa.start);
-      return getAllStates(nfaResult.nfa.start);
+      if (step.nfa) return [...getAllStates(step.nfa.start)];
+      return [...getAllStates(nfaResult.nfa.start)];
     }
     if (phase === 'dfa' && dfaResult) {
-      return getAllStates(dfaResult.dfa);
+      return [...getAllStates(dfaResult.dfa)];
     }
     if (phase === 'min' && minResult) {
-      return getAllStates(minResult.dfa);
+      return [...getAllStates(minResult.dfa)];
     }
-    return new Set();
+    return [];
   }
   
-  function getStartState() {
+  function computeStartState() {
     if (phase === 'nfa' && nfaResult) {
       const step = nfaResult.steps[Math.min(nfaStepIndex, nfaResult.steps.length - 1)];
       if (step.nfa) return step.nfa.start;
@@ -109,8 +135,8 @@
   <div class="main-content">
     <div class="graph-panel">
       <AutomatonGraph 
-        states={[...getCurrentStates()]}
-        startState={getStartState()}
+        states={currentStates}
+        startState={currentStartState}
         title={phase === 'nfa' ? 'NFA状态转移图' : phase === 'dfa' ? 'DFA状态转移图' : '最小化DFA'}
       />
     </div>
