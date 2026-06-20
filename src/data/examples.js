@@ -120,8 +120,7 @@ if (x) {
 int result = undefined_var + 1;
 
 // 正确: int与float运算结果为float(隐式提升)
-float mixed = x + y;
-return 0;`,
+float mixed = x + y;`,
   semantic_demo3: `// 示例3: 嵌套作用域与变量遮蔽演示
 int level0 = 0;
 

@@ -1488,17 +1488,34 @@ export function analyzeSemantics(source) {
   const symbolResult = buildSymbolTable(ast);
   const typeResult = typeCheck(ast, symbolResult);
 
+  const categorizedParseErrors = parseErrors.map(e => ({
+    ...e,
+    severity: 'error',
+    types: [],
+    category: 'syntax'
+  }));
+
+  const categorizedTypeErrors = typeResult.errors.map(e => ({
+    ...e,
+    category: e.category || 'type'
+  }));
+
   const allErrors = [
-    ...parseErrors.map(e => ({ ...e, severity: 'error', types: [] })),
-    ...typeResult.errors
+    ...categorizedParseErrors,
+    ...categorizedTypeErrors
   ];
+
+  const totalLines = source.split('\n').length;
+  if (symbolResult.globalScope) {
+    symbolResult.globalScope.lineEnd = totalLines;
+  }
 
   return {
     ast,
     tokens,
-    parseErrors,
+    parseErrors: categorizedParseErrors,
     ...symbolResult,
-    typeErrors: typeResult.errors,
+    typeErrors: categorizedTypeErrors,
     nodeTypes: typeResult.nodeTypes,
     allErrors
   };

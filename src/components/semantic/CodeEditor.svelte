@@ -17,6 +17,20 @@
   let tooltipY = 0;
   let tooltipMessage = '';
 
+  function handleSelectionChange() {
+    if (document.activeElement === textareaRef) {
+      updateCursorPosition();
+    }
+  }
+
+  onMount(() => {
+    document.addEventListener('selectionchange', handleSelectionChange);
+  });
+
+  onDestroy(() => {
+    document.removeEventListener('selectionchange', handleSelectionChange);
+  });
+
   $: {
     const lines = value.split('\n');
     lineNumbers = Array.from({ length: lines.length }, (_, i) => i + 1);
@@ -26,6 +40,10 @@
     value = e.target.value;
     dispatch('input', value);
     updateCursorPosition();
+  }
+
+  function handleKeyDown(e) {
+    setTimeout(updateCursorPosition, 0);
   }
 
   function updateCursorPosition() {
@@ -51,7 +69,8 @@
   }
 
   function handleMouseMove(e) {
-    if (!textareaRef || errorRanges.length === 0) {
+    const errors = errorRanges;
+    if (!textareaRef || errors.length === 0) {
       tooltipVisible = false;
       return;
     }
@@ -77,7 +96,7 @@
     const col = Math.max(0, Math.floor((textX - paddingLeft) / charWidth));
     const charPos = lineStart + Math.min(col, lines[line - 1].length);
 
-    const error = errorRanges.find(err => charPos >= err.start && charPos <= err.end);
+    const error = errors.find(err => charPos >= err.start && charPos <= err.end);
     if (error) {
       hoveredError = error;
       tooltipVisible = true;
@@ -118,6 +137,18 @@
     textareaRef.scrollTop = Math.max(0, (line - 5) * 20);
   }
 
+  export function focusAndSelect(start, end, targetLine) {
+    if (!textareaRef) return;
+    textareaRef.focus();
+    requestAnimationFrame(() => {
+      if (!textareaRef) return;
+      textareaRef.setSelectionRange(start, end);
+      const scrollLine = targetLine > 0 ? targetLine : (value.substring(0, start).split('\n').length);
+      textareaRef.scrollTop = Math.max(0, (scrollLine - 3) * 20);
+      updateCursorPosition();
+    });
+  }
+
   function isPositionInRanges(pos, ranges) {
     return ranges.some(r => pos >= r.start && pos < r.end);
   }
@@ -140,15 +171,15 @@
     return classes.join(' ');
   }
 
-  function buildHighlightedSegments() {
-    if ((!highlightRanges || highlightRanges.length === 0) &&
-        (!errorRanges || errorRanges.length === 0)) {
-      return [{ text: value, classes: '' }];
+  function buildHighlightedSegments(source, hlRanges, errRanges) {
+    if ((!hlRanges || hlRanges.length === 0) &&
+        (!errRanges || errRanges.length === 0)) {
+      return [{ text: source, classes: '' }];
     }
 
     const allRanges = [
-      ...(highlightRanges || []).map(r => ({ ...r, type: 'hl' })),
-      ...(errorRanges || []).map(r => ({ ...r, type: 'err' }))
+      ...(hlRanges || []).map(r => ({ ...r, type: 'hl' })),
+      ...(errRanges || []).map(r => ({ ...r, type: 'err' }))
     ];
 
     const events = [];
@@ -176,7 +207,7 @@
           classes.push(hasWarning ? 'warning-squiggle' : 'error-squiggle');
         }
         segments.push({
-          text: value.substring(currentPos, ev.pos),
+          text: source.substring(currentPos, ev.pos),
           classes: classes.join(' ')
         });
         currentPos = ev.pos;
@@ -190,7 +221,7 @@
       }
     }
 
-    if (currentPos < value.length) {
+    if (currentPos < source.length) {
       const classes = [];
       for (const r of activeHL) {
         classes.push(`hl-${r.kind || 'default'}`);
@@ -202,7 +233,7 @@
         classes.push(hasWarning ? 'warning-squiggle' : 'error-squiggle');
       }
       segments.push({
-        text: value.substring(currentPos),
+        text: source.substring(currentPos),
         classes: classes.join(' ')
       });
     }
@@ -210,7 +241,7 @@
     return segments;
   }
 
-  $: highlightedSegments = buildHighlightedSegments();
+  $: highlightedSegments = buildHighlightedSegments(value, highlightRanges, errorRanges);
 </script>
 
 <div class="code-editor-container" on:mousemove={handleMouseMove} on:mouseleave={handleMouseLeave}>
@@ -231,6 +262,7 @@
       bind:value={value}
       spellcheck="false"
       on:input={handleInput}
+      on:keydown={handleKeyDown}
       on:keyup={handleKeyUp}
       on:click={handleClick}
       on:select={handleSelect}

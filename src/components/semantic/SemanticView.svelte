@@ -112,7 +112,7 @@
   }
 
   function handleCursorChange(e) {
-    cursorPos = { line: e.line, column: e.column };
+    cursorPos = { line: e.detail.line, column: e.detail.column };
     updateCursorScope();
   }
 
@@ -138,9 +138,10 @@
 
   function handleErrorSelect(error) {
     selectedError = error;
-    if (editorRef) {
-      editorRef.selectRange(error.start || 0, (error.end || error.start || 0) + 1);
-      editorRef.setCursorPosition(error.line || 1, 1);
+    if (editorRef && error) {
+      const start = error.start || 0;
+      const end = (error.end !== undefined && error.end > start) ? error.end : start + 1;
+      editorRef.focusAndSelect(start, end, error.line || 1);
     }
   }
 
@@ -205,8 +206,6 @@
             bind:value={sourceCode}
             {highlightRanges}
             {errorRanges}
-            bind:cursorLine={cursorPos.line}
-            bind:cursorColumn={cursorPos.column}
             on:input={(e) => { sourceCode = e.detail; }}
             on:cursorChange={handleCursorChange}
           />
@@ -253,8 +252,8 @@
           class:active={activeTab === 'type'}
           on:click={() => activeTab = 'type'}>
           🔍 类型检查
-          {#if (analysisResult?.allErrors?.length || 0) > 0}
-            <span class="tab-count error-count">{analysisResult.allErrors.length}</span>
+          {#if (analysisResult?.typeErrors?.length || 0) > 0}
+            <span class="tab-count error-count">{analysisResult.typeErrors.length}</span>
           {/if}
         </button>
       </div>
@@ -271,7 +270,7 @@
           />
         {:else}
           <TypeCheckPanel
-            errors={analysisResult?.allErrors || []}
+            errors={analysisResult?.typeErrors || []}
             {selectedError}
             highlightSymbol={selectedSymbol}
             on:errorSelect={(e) => handleErrorSelect(e.detail)}
