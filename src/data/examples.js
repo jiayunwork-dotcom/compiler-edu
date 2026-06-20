@@ -153,3 +153,67 @@ void outer() {
   int c = a + 1;
 }`
 };
+
+export const INCREMENTAL_PROJECTS = {
+  diamond_demo: {
+    name: '菱形依赖示例',
+    description: 'A依赖B和C，B和C都依赖D',
+    files: {
+      'main': {
+        name: 'main.c',
+        content: `// 主程序入口
+import { compute } from logic;
+import { print } from utils;
+
+int main() {
+  int x = 10;
+  int y = 20;
+  int result = compute(x, y);
+  print(result);
+  return 0;
+}`
+      },
+      'logic': {
+        name: 'logic.c',
+        content: `// 业务逻辑模块
+import { add } from math;
+import { multiply } from math;
+
+int compute(int a, int b) {
+  int sum = add(a, b);
+  int product = multiply(a, b);
+  return add(sum, product);
+}`
+      },
+      'utils': {
+        name: 'utils.c',
+        content: `// 工具函数模块
+import { format } from math;
+
+void print(int value) {
+  int formatted = format(value);
+  // 输出格式化后的值
+  int output = formatted;
+}`
+      },
+      'math': {
+        name: 'math.c',
+        content: `// 数学基础库
+int add(int a, int b) {
+  return a + b;
+}
+
+int multiply(int a, int b) {
+  return a * b;
+}
+
+int format(int num) {
+  if (num < 0) {
+    return num * -1;
+  }
+  return num;
+}`
+      }
+    }
+  }
+};
