@@ -3,7 +3,7 @@
   import { buildNFAWithSteps } from '../../lib/automata/regexToNFA.js';
   import { nfaToDFA } from '../../lib/automata/nfaToDFA.js';
   import { minimizeDFA } from '../../lib/automata/minimizeDFA.js';
-  import { getAllStates } from '../../lib/automata/utils.js';
+  import { getAllStates, epsilonClosure, move, EPSILON } from '../../lib/automata/utils.js';
   import AutomatonGraph from '../common/AutomatonGraph.svelte';
   
   let regex = '(a|b)*abb';
@@ -15,6 +15,16 @@
   let nfaStepIndex = 0;
   let dfaStepIndex = 0;
   let minStepIndex = 0;
+  
+  let testString = '';
+  let simStep = 0;
+  let simulating = false;
+  let simActiveStates = [];
+  let simHighlightedStates = new Set();
+  let simHighlightedEdges = new Set();
+  let simAccepted = null;
+  let simHistory = [];
+  let simError = null;
   
   $: currentStates = (() => {
     if (phase === 'nfa' && nfaResult) {
@@ -96,6 +106,135 @@
     return null;
   }
   
+  function getCurrentAutomatonStart() {
+    return computeStartState();
+  }
+  
+  function isNFA() {
+    return phase === 'nfa';
+  }
+  
+  function startSimulation() {
+    if (!testString) {
+      alert('请输入测试字符串');
+      return;
+    }
+    const start = getCurrentAutomatonStart();
+    if (!start) {
+      alert('请先构建自动机');
+      return;
+    }
+    
+    simulating = true;
+    simStep = 0;
+    simAccepted = null;
+    simError = null;
+    simHistory = [];
+    simHighlightedEdges = new Set();
+    
+    let initialStates;
+    if (isNFA()) {
+      initialStates = [...epsilonClosure(new Set([start]))];
+    } else {
+      initialStates = [start];
+    }
+    
+    simActiveStates = initialStates;
+    simHighlightedStates = new Set(initialStates.map(s => s.id));
+    simHistory.push({
+      step: 0,
+      char: '(起始)',
+      activeStates: [...simActiveStates],
+      isAccepting: simActiveStates.some(s => s.isAccepting)
+    });
+  }
+  
+  function stepSimulation() {
+    if (!simulating || simAccepted !== null) return;
+    if (simStep >= testString.length) {
+      simAccepted = simActiveStates.some(s => s.isAccepting);
+      return;
+    }
+    
+    const ch = testString[simStep];
+    const currentActive = simActiveStates;
+    const newHighlightedEdges = new Set(simHighlightedEdges);
+    let nextStates = [];
+    
+    if (isNFA()) {
+      const moved = move(new Set(currentActive), ch);
+      const closure = epsilonClosure(moved);
+      nextStates = [...closure];
+      
+      for (const from of currentActive) {
+        if (from.transitions.has(ch)) {
+          for (const to of from.transitions.get(ch)) {
+            newHighlightedEdges.add(`${from.id}-${to.id}-${ch}`);
+          }
+        }
+      }
+      for (const s of moved) {
+        const epsilonReachable = epsilonClosure(new Set([s]));
+        for (const from of epsilonReachable) {
+          if (from.transitions.has(EPSILON)) {
+            for (const to of from.transitions.get(EPSILON)) {
+              if (closure.has(to)) {
+                newHighlightedEdges.add(`${from.id}-${to.id}-${EPSILON}`);
+              }
+            }
+          }
+        }
+      }
+    } else {
+      for (const from of currentActive) {
+        if (from.transitions.has(ch)) {
+          const targets = [...from.transitions.get(ch)];
+          nextStates.push(...targets);
+          for (const to of targets) {
+            newHighlightedEdges.add(`${from.id}-${to.id}-${ch}`);
+          }
+        }
+      }
+    }
+    
+    simHighlightedEdges = newHighlightedEdges;
+    simActiveStates = nextStates;
+    simHighlightedStates = new Set(nextStates.map(s => s.id));
+    simStep++;
+    
+    simHistory.push({
+      step: simStep,
+      char: ch,
+      activeStates: [...simActiveStates],
+      isAccepting: simActiveStates.some(s => s.isAccepting)
+    });
+    
+    if (simStep >= testString.length) {
+      simAccepted = simActiveStates.some(s => s.isAccepting);
+    } else if (simActiveStates.length === 0) {
+      simAccepted = false;
+      simError = `在位置 ${simStep}，字符 "${ch}" 无法继续转移`;
+    }
+  }
+  
+  function resetSimulation() {
+    simulating = false;
+    simStep = 0;
+    simActiveStates = [];
+    simHighlightedStates = new Set();
+    simHighlightedEdges = new Set();
+    simAccepted = null;
+    simHistory = [];
+    simError = null;
+  }
+  
+  function runFullSimulation() {
+    if (!simulating) startSimulation();
+    while (simulating && simAccepted === null) {
+      stepSimulation();
+    }
+  }
+  
   onMount(() => {
     convert();
   });
@@ -120,6 +259,90 @@
     />
   </div>
   
+  <div class="verification-panel">
+    <div class="panel-title-small">
+      <h3>🔍 反向验证 - 测试字符串匹配</h3>
+    </div>
+    <div class="verification-controls">
+      <input 
+        type="text" 
+        bind:value={testString}
+        placeholder="输入测试字符串，如 aabba"
+        class="test-input"
+      />
+      {#if !simulating}
+        <button on:click={startSimulation} class="primary" disabled={!regex || !testString}>开始匹配</button>
+      {:else}
+        <button on:click={stepSimulation} 
+                disabled={simAccepted !== null || simStep >= testString.length}>
+          前进一步 →
+        </button>
+        <button on:click={runFullSimulation} 
+                disabled={simAccepted !== null}
+                class="primary">全部执行</button>
+        <button on:click={resetSimulation} class="danger">重置</button>
+      {/if}
+    </div>
+    
+    {#if simulating}
+      <div class="simulation-status">
+        <div class="sim-progress">
+          <span>进度: {simStep}/{testString.length}</span>
+          <span class="sim-string">
+            {#each testString as ch, i}
+              <span class:current={i === simStep - 1} 
+                    class:done={i < simStep}
+                    class:pending={i >= simStep}>
+                {ch}
+              </span>
+            {/each}
+          </span>
+        </div>
+        
+        <div class="sim-active">
+          <strong>当前活跃状态{isNFA() ? '集合' : ''}:</strong>
+          {#if simActiveStates.length > 0}
+            {#each simActiveStates as s}
+              <span class="state-badge state-active">
+                S{s.id}{s.isAccepting ? ' ✓' : ''}
+              </span>
+            {/each}
+          {:else}
+            <span class="state-badge state-empty">∅ (空集合)</span>
+          {/if}
+        </div>
+        
+        {#if simAccepted !== null}
+          <div class="sim-result {simAccepted ? 'accepted' : 'rejected'}">
+            {simAccepted ? '✓ 字符串被接受！' : '✗ 字符串被拒绝'}
+            {#if simError}
+              <div class="sim-error-detail">{simError}</div>
+            {/if}
+          </div>
+        {/if}
+        
+        {#if simHistory.length > 0}
+          <div class="sim-history">
+            <h4>匹配步骤历史:</h4>
+            <div class="history-table">
+              <div class="history-row history-head">
+                <span>步骤</span><span>字符</span><span>活跃状态</span><span>接受</span>
+              </div>
+              {#each simHistory as h}
+                <div class="history-row" class:current={h.step === simStep}>
+                  <span>{h.step}</span>
+                  <span class="mono">{h.char}</span>
+                  <span>{h.activeStates.map(s => 'S' + s.id).join(', ') || '∅'}</span>
+                  <span>{h.isAccepting ? '✓' : ''}</span>
+                </div>
+              {/each}
+            </div>
+          </div>
+        {/if}
+      </div>
+    {/if}
+  </div>
+  
   <div class="phase-tabs">
     <button class:active={phase === 'nfa'} on:click={() => phase = 'nfa'} disabled={!nfaResult}>
       ① NFA (Thompson构造)
@@ -138,6 +361,8 @@
         states={currentStates}
         startState={currentStartState}
         title={phase === 'nfa' ? 'NFA状态转移图' : phase === 'dfa' ? 'DFA状态转移图' : '最小化DFA'}
+        highlightedStates={simHighlightedStates}
+        highlightedEdges={simHighlightedEdges}
       />
     </div>
     
@@ -392,5 +617,181 @@
   .subset-table h4 {
     margin-bottom: 8px;
     font-size: 13px;
+  }
+  
+  .verification-panel {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding: 14px 16px;
+  }
+  
+  .panel-title-small {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  
+  .panel-title-small h3 {
+    margin: 0;
+    font-size: 14px;
+  }
+  
+  .verification-controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+  
+  .test-input {
+    flex: 1;
+    font-size: 14px;
+    padding: 8px 12px;
+  }
+  
+  .simulation-status {
+    border-top: 1px solid var(--color-border);
+    padding-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  
+  .sim-progress {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    font-size: 13px;
+  }
+  
+  .sim-string {
+    display: flex;
+    gap: 2px;
+    font-family: monospace;
+  }
+  
+  .sim-string span {
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-weight: 600;
+  }
+  
+  .sim-string .done {
+    background: #dbeafe;
+    color: #1d4ed8;
+  }
+  
+  .sim-string .current {
+    background: #2563eb;
+    color: white;
+    animation: pulse 1s infinite;
+  }
+  
+  .sim-string .pending {
+    background: #f1f5f9;
+    color: #64748b;
+  }
+  
+  @keyframes pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+  }
+  
+  .sim-active {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    font-size: 13px;
+  }
+  
+  .state-badge {
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-family: monospace;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  
+  .state-badge.state-active {
+    background: #dbeafe;
+    color: #1d4ed8;
+    border: 1px solid #2563eb;
+  }
+  
+  .state-badge.state-empty {
+    background: #fee2e2;
+    color: #991b1b;
+    border: 1px solid #dc2626;
+  }
+  
+  .sim-result {
+    padding: 10px 14px;
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 14px;
+  }
+  
+  .sim-result.accepted {
+    background: #dcfce7;
+    color: #166534;
+  }
+  
+  .sim-result.rejected {
+    background: #fee2e2;
+    color: #991b1b;
+  }
+  
+  .sim-error-detail {
+    margin-top: 4px;
+    font-size: 12px;
+    font-weight: 400;
+    opacity: 0.9;
+  }
+  
+  .sim-history {
+    border-top: 1px solid var(--color-border);
+    padding-top: 10px;
+  }
+  
+  .sim-history h4 {
+    margin: 0 0 8px 0;
+    font-size: 12px;
+    color: var(--color-text-muted);
+  }
+  
+  .history-table {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 180px;
+    overflow-y: auto;
+    font-size: 11px;
+  }
+  
+  .history-row {
+    display: grid;
+    grid-template-columns: 40px 50px 1fr 40px;
+    gap: 8px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    align-items: center;
+  }
+  
+  .history-row.history-head {
+    background: var(--color-surface-alt);
+    font-weight: 600;
+    color: var(--color-text-muted);
+  }
+  
+  .history-row.current {
+    background: #eef2ff;
+    font-weight: 600;
+  }
+  
+  .mono {
+    font-family: monospace;
   }
 </style>

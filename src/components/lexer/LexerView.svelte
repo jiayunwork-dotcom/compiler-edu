@@ -5,9 +5,11 @@
   
   let sourceCode = DEFAULT_CODE_SAMPLES.simple;
   let tokens = [];
+  let defaultTokens = [];
   let highlightRanges = [];
   let rules = JSON.parse(JSON.stringify(DEFAULT_RULES));
   let showRules = false;
+  let showCompare = false;
   
   let stepper = null;
   let stepPos = 0;
@@ -39,6 +41,7 @@
   function analyze() {
     try {
       tokens = tokenize(sourceCode, rules);
+      defaultTokens = tokenize(sourceCode, DEFAULT_RULES);
       highlightRanges = tokens.map(t => ({
         start: t.start,
         end: t.end,
@@ -48,6 +51,23 @@
       lastToken = null;
     } catch (e) {
       console.error(e);
+    }
+  }
+  
+  function tokensEqual(t1, t2) {
+    if (!t1 || !t2) return false;
+    return t1.type === t2.type && t1.value === t2.value;
+  }
+  
+  function isTokenDifferent(idx, side) {
+    if (side === 'default') {
+      if (idx >= defaultTokens.length) return true;
+      if (idx >= tokens.length) return true;
+      return !tokensEqual(defaultTokens[idx], tokens[idx]);
+    } else {
+      if (idx >= tokens.length) return true;
+      if (idx >= defaultTokens.length) return true;
+      return !tokensEqual(tokens[idx], defaultTokens[idx]);
     }
   }
   
@@ -111,6 +131,9 @@
       {/if}
       <button on:click={() => showRules = !showRules}>
         {showRules ? '隐藏规则' : '自定义规则'}
+      </button>
+      <button on:click={() => showCompare = !showCompare} class:active={showCompare}>
+        {showCompare ? '关闭对比' : '对比模式'}
       </button>
     </div>
   </div>
@@ -212,24 +235,69 @@
     </div>
     
     <div class="right-panel">
-      <div class="panel">
-        <div class="panel-title">
-          <h3>Token序列 ({tokens.length})</h3>
+      {#if !showCompare}
+        <div class="panel">
+          <div class="panel-title">
+            <h3>Token序列 ({tokens.length})</h3>
+          </div>
+          <div class="token-list">
+            {#if tokens.length === 0}
+              <p class="muted">点击"开始分析"生成Token序列</p>
+            {:else}
+              {#each tokens as token}
+                <div class="token-row" style="background: {tokenColors[token.type]}">
+                  <span class="badge badge-{token.type.toLowerCase().replace(/\s/g, '-')}">{token.type}</span>
+                  <code class="token-value">{token.value}</code>
+                  <span class="token-pos">L{token.line}:C{token.column}</span>
+                </div>
+              {/each}
+            {/if}
+          </div>
         </div>
-        <div class="token-list">
-          {#if tokens.length === 0}
-            <p class="muted">点击"开始分析"生成Token序列</p>
-          {:else}
-            {#each tokens as token}
-              <div class="token-row" style="background: {tokenColors[token.type]}">
-                <span class="badge badge-{token.type.toLowerCase().replace(/\s/g, '-')}">{token.type}</span>
-                <code class="token-value">{token.value}</code>
-                <span class="token-pos">L{token.line}:C{token.column}</span>
+      {:else}
+        <div class="panel">
+          <div class="panel-title">
+            <h3>Token对比 - 默认规则 vs 自定义规则</h3>
+            <span class="muted">黄色高亮 = 存在差异</span>
+          </div>
+          <div class="compare-container">
+            <div class="compare-column">
+              <div class="compare-header">默认规则 ({defaultTokens.length})</div>
+              <div class="token-list">
+                {#if defaultTokens.length === 0}
+                  <p class="muted">无数据</p>
+                {:else}
+                  {#each defaultTokens as token, idx}
+                    <div class="token-row" 
+                         style="background: {isTokenDifferent(idx, 'default') ? '#fef9c3' : tokenColors[token.type]}">
+                      <span class="badge badge-{token.type.toLowerCase().replace(/\s/g, '-')}">{token.type}</span>
+                      <code class="token-value">{token.value}</code>
+                      <span class="token-pos">L{token.line}:C{token.column}</span>
+                    </div>
+                  {/each}
+                {/if}
               </div>
-            {/each}
-          {/if}
+            </div>
+            <div class="compare-column">
+              <div class="compare-header">自定义规则 ({tokens.length})</div>
+              <div class="token-list">
+                {#if tokens.length === 0}
+                  <p class="muted">无数据</p>
+                {:else}
+                  {#each tokens as token, idx}
+                    <div class="token-row" 
+                         style="background: {isTokenDifferent(idx, 'custom') ? '#fef9c3' : tokenColors[token.type]}">
+                      <span class="badge badge-{token.type.toLowerCase().replace(/\s/g, '-')}">{token.type}</span>
+                      <code class="token-value">{token.value}</code>
+                      <span class="token-pos">L{token.line}:C{token.column}</span>
+                    </div>
+                  {/each}
+                {/if}
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
+      {/if}
       
       <div class="panel">
         <div class="panel-title">
@@ -446,5 +514,33 @@
   .muted {
     color: var(--color-text-muted);
     font-size: 13px;
+  }
+  
+  .compare-container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  
+  .compare-column {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  
+  .compare-header {
+    font-weight: 600;
+    font-size: 13px;
+    padding: 8px 12px;
+    background: var(--color-surface-alt);
+    border-radius: 6px 6px 0 0;
+    border-bottom: 1px solid var(--color-border);
+  }
+  
+  .compare-column .token-list {
+    max-height: 400px;
+    border: 1px solid var(--color-border);
+    border-top: none;
+    border-radius: 0 0 6px 6px;
   }
 </style>

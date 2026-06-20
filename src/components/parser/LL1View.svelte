@@ -21,6 +21,29 @@
   let cstRoot = null;
   let astRoot = null;
   
+  let tooltipData = null;
+  let tooltipStyle = {};
+  
+  function getConflictDiagnosis(nt, t) {
+    if (!tableResult?.conflicts) return null;
+    return tableResult.conflicts.find(c => c.nonTerminal === nt && c.terminal === t);
+  }
+  
+  function showTooltip(event, nt, t) {
+    const conflict = getConflictDiagnosis(nt, t);
+    if (!conflict) return;
+    tooltipData = conflict;
+    const rect = event.target.getBoundingClientRect();
+    tooltipStyle = {
+      left: rect.left + 'px',
+      top: (rect.bottom + 8) + 'px'
+    };
+  }
+  
+  function hideTooltip() {
+    tooltipData = null;
+  }
+  
   function analyze() {
     try {
       productions = parseGrammar(grammarText);
@@ -202,7 +225,10 @@
                 <td><strong>{nt}</strong></td>
                 {#each tableResult.terminals as t}
                   {@const entries = tableResult.table[nt][t]}
-                  <td class:conflict={entries.length > 1}>
+                  {@const isConflict = entries.length > 1}
+                  <td class:conflict={isConflict}
+                      on:mouseenter={(e) => isConflict && showTooltip(e, nt, t)}
+                      on:mouseleave={hideTooltip}>
                     {#each entries as e, ei}
                       {e.head} → {e.body.length === 0 ? 'ε' : e.body.join(' ')}
                       {#if ei < entries.length - 1}<br />{/if}
@@ -266,6 +292,45 @@
     </div>
   {/if}
 </div>
+
+{#if tooltipData}
+  <div class="conflict-tooltip" style={tooltipStyle}>
+    <div class="tooltip-header">
+      <strong>⚠️ LL(1) 冲突诊断</strong>
+    </div>
+    <div class="tooltip-section">
+      <div class="tooltip-label">冲突位置:</div>
+      <div class="tooltip-value">
+        非终结符 {tooltipData.nonTerminal} × 终结符 "{tooltipData.terminal}"</div>
+    </div>
+    <div class="tooltip-section">
+      <div class="tooltip-label">冲突类型:</div>
+      <div class="tooltip-value conflict-type">{tooltipData.diagnosis.type}</div>
+    </div>
+    <div class="tooltip-section">
+      <div class="tooltip-label">冲突原因:</div>
+      <div class="tooltip-value">{tooltipData.diagnosis.reason}</div>
+    </div>
+    <div class="tooltip-section">
+      <div class="tooltip-label">冲突产生式:</div>
+      <div class="tooltip-value">
+        {#each tooltipData.entries as e}
+          <div>· {e.head} → {e.body.length === 0 ? 'ε' : e.body.join(' ')}
+            <span class="via-{e.addedVia}">[{e.addedVia === 'first' ? 'First集' : 'Follow集'}]</span>
+          </div>
+        {/each}
+      </div>
+    </div>
+    <div class="tooltip-section suggestions">
+      <div class="tooltip-label">消解建议:</div>
+      <div class="tooltip-value">
+        {#each tooltipData.diagnosis.suggestions as s}
+          <div class="suggestion-line">{s}</div>
+        {/each}
+      </div>
+    </div>
+  </div>
+{/if}
 
 <style>
   .view-container {
@@ -425,5 +490,77 @@
     background: var(--color-primary);
     color: white;
     border-color: var(--color-primary);
+  }
+  
+  .parse-table td.conflict {
+    cursor: help;
+    position: relative;
+  }
+  
+  .conflict-tooltip {
+    position: fixed;
+    z-index: 1000;
+    background: white;
+    border: 1px solid #dc2626;
+    border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+    padding: 12px 14px;
+    max-width: 420px;
+    font-size: 12px;
+    line-height: 1.6;
+  }
+  
+  .tooltip-header {
+    font-size: 13px;
+    color: #dc2626;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #fee2e2;
+  }
+  
+  .tooltip-section {
+    margin-bottom: 8px;
+  }
+  
+  .tooltip-section:last-child {
+    margin-bottom: 0;
+  }
+  
+  .tooltip-label {
+    font-weight: 600;
+    color: #374151;
+    margin-bottom: 2px;
+  }
+  
+  .tooltip-value {
+    color: #1f2937;
+    white-space: pre-wrap;
+    font-family: monospace;
+  }
+  
+  .conflict-type {
+    color: #dc2626;
+    font-weight: 600;
+  }
+  
+  .via-first {
+    color: #7c3aed;
+    font-size: 10px;
+    margin-left: 4px;
+  }
+  
+  .via-follow {
+    color: #0369a1;
+    font-size: 10px;
+    margin-left: 4px;
+  }
+  
+  .suggestions .suggestion-line {
+    padding: 3px 0;
+    border-bottom: 1px solid #f1f5f9;
+  }
+  
+  .suggestions .suggestion-line:last-child {
+    border-bottom: none;
   }
 </style>

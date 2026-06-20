@@ -2,8 +2,19 @@
   export let states = [];
   export let startState = null;
   export let title = '自动机';
+  export let highlightedStates = new Set();
+  export let highlightedEdges = new Set();
   
   $: layout = computeLayout(states, startState);
+  
+  function isHighlighted(stateId) {
+    return highlightedStates.has(stateId);
+  }
+  
+  function isEdgeHighlighted(fromId, toId, symbol) {
+    const key = `${fromId}-${toId}-${symbol}`;
+    return highlightedEdges.has(key);
+  }
   
   function computeLayout(stateSet, start) {
     if (!stateSet || stateSet.length === 0) return { nodes: [], edges: [], width: 400, height: 200 };
@@ -168,6 +179,9 @@
         <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
           <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569" />
         </marker>
+        <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#2563eb" />
+        </marker>
       </defs>
       
       {#if startState}
@@ -181,12 +195,13 @@
       {/if}
       
       {#each layout.edges as edge}
+        {@const edgeHL = isEdgeHighlighted(edge.from.id, edge.to.id, edge.symbol)}
         <path 
           d={edgePath(edge.from, edge.to, edge.selfLoop, edge.curved, edge.curvedDir)}
-          stroke="#475569"
-          stroke-width="1.5"
+          stroke={edgeHL ? '#2563eb' : '#475569'}
+          stroke-width={edgeHL ? '3' : '1.5'}
           fill="none"
-          marker-end="url(#arrow)"
+          marker-end={edgeHL ? 'url(#arrow-blue)' : 'url(#arrow)'}
         />
         {@const lp = labelPos(edge.from, edge.to, edge.selfLoop, edge.curved, edge.curvedDir)}
         <rect 
@@ -195,27 +210,35 @@
           width="16" 
           height="16" 
           rx="3"
-          fill="white"
-          stroke="#cbd5e1"
+          fill={edgeHL ? '#dbeafe' : 'white'}
+          stroke={edgeHL ? '#2563eb' : '#cbd5e1'}
         />
-        <text x={lp.x} y={lp.y + 2} text-anchor="middle" font-size="11" fill="#1e293b" font-family="monospace">
+        <text x={lp.x} y={lp.y + 2} text-anchor="middle" font-size="11" 
+              fill={edgeHL ? '#1d4ed8' : '#1e293b'} 
+              font-family="monospace"
+              font-weight={edgeHL ? '700' : '400'}>
           {edge.symbol}
         </text>
       {/each}
       
       {#each layout.nodes as node}
+        {@const nodeHL = isHighlighted(node.id)}
         <circle 
           cx={node.x} 
           cy={node.y} 
           r="22" 
-          fill={node.isAccepting ? '#f0fdf4' : 'white'}
-          stroke={node.isAccepting ? '#22c55e' : '#475569'}
-          stroke-width={node.isAccepting ? '3' : '2'}
+          fill={nodeHL ? '#dbeafe' : (node.isAccepting ? '#f0fdf4' : 'white')}
+          stroke={nodeHL ? '#2563eb' : (node.isAccepting ? '#22c55e' : '#475569')}
+          stroke-width={nodeHL ? '3.5' : (node.isAccepting ? '3' : '2')}
         />
         {#if node.isAccepting}
-          <circle cx={node.x} cy={node.y} r="17" fill="none" stroke="#22c55e" stroke-width="1.5" />
+          <circle cx={node.x} cy={node.y} r="17" fill="none" 
+                  stroke={nodeHL ? '#2563eb' : '#22c55e'} 
+                  stroke-width={nodeHL ? '2.5' : '1.5'} />
         {/if}
-        <text x={node.x} y={node.y + 4} text-anchor="middle" font-size="13" font-weight="600" fill="#1e293b">
+        <text x={node.x} y={node.y + 4} text-anchor="middle" font-size="13" 
+              font-weight={nodeHL ? '700' : '600'} 
+              fill={nodeHL ? '#1d4ed8' : '#1e293b'}>
           S{node.id}
         </text>
       {/each}

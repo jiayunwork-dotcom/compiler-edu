@@ -267,6 +267,8 @@ export function buildLL1Table(productions, first, follow) {
     }
   }
   
+  const prodEntries = new Map();
+  
   for (let i = 0; i < productions.length; i++) {
     const prod = productions[i];
     const A = prod.head;
@@ -292,15 +294,23 @@ export function buildLL1Table(productions, first, follow) {
       if (allHaveEpsilon) firstBody.add(EPSILON);
     }
     
+    const entryInfo = {
+      production: i,
+      head: A,
+      body,
+      firstBody: [...firstBody],
+      hasEpsilon: firstBody.has(EPSILON)
+    };
+    
     for (const t of firstBody) {
       if (t !== EPSILON) {
-        table[A][t].push({ production: i, head: A, body });
+        table[A][t].push({ ...entryInfo, addedVia: 'first' });
       }
     }
     
     if (firstBody.has(EPSILON)) {
       for (const t of follow.get(A)) {
-        table[A][t].push({ production: i, head: A, body });
+        table[A][t].push({ ...entryInfo, addedVia: 'follow' });
       }
     }
   }
@@ -308,12 +318,154 @@ export function buildLL1Table(productions, first, follow) {
   for (const nt of nonTerminals) {
     for (const t of symbols) {
       if (table[nt][t].length > 1) {
-        conflicts.push({ nonTerminal: nt, terminal: t, entries: table[nt][t] });
+        const entries = table[nt][t];
+        const diagnosis = diagnoseConflict(nt, t, entries, first, follow);
+        conflicts.push({ 
+          nonTerminal: nt, 
+          terminal: t, 
+          entries,
+          diagnosis
+        });
       }
     }
   }
   
   return { table, terminals: symbols, nonTerminals, conflicts };
+}
+
+function diagnoseConflict(nonTerminal, terminal, entries, first, follow) {
+  const firstFirstConflicts = [];
+  const firstFollowConflicts = [];
+  const followFollowConflicts = [];
+  
+  for (let i = 0; i < entries.length; i++) {
+    for (let j = i + 1; j < entries.length; j++) {
+      const e1 = entries[i];
+      const e2 = entries[j];
+      const prod1Str = `${e1.head} → ${e1.body.length === 0 ? EPSILON : e1.body.join(' ')}`;
+      const prod2Str = `${e2.head} → ${e2.body.length === 0 ? EPSILON : e2.body.join(' ')}`;
+      
+      if (e1.addedVia === 'first' && e2.addedVia === 'first') {
+        firstFirstConflicts.push({ prod1: prod1Str, prod2: prod2Str });
+      } else if ((e1.addedVia === 'first' && e2.addedVia === 'follow') ||
+                 (e1.addedVia === 'follow' && e2.addedVia === 'first')) {
+        const firstProd = e1.addedVia === 'first' ? prod1Str : prod2Str;
+        const followProd = e1.addedVia === 'follow' ? prod1Str : prod2Str;
+        firstFollowConflicts.push({ firstProd, followProd });
+      } else if (e1.addedVia === 'follow' && e2.addedVia === 'follow') {
+        followFollowConflicts.push({ prod1: prod1Str, prod2: prod2Str });
+      }
+    }
+  }
+  
+  let conflictType = '';
+  let reason = '';
+  let suggestions = [];
+  
+  if (firstFirstConflicts.length > 0 && firstFollowConflicts.length === 0) {
+    conflictType = 'First集交集冲突';
+    const pairs = firstFirstConflicts.map(c => `(${c.prod1}) 与 (${c.prod2})`).join('、');
+    reason = `以下产生式的First集都包含终结符 "${terminal}"：${pairs}。`;
+    suggestions = generateLeftFactoringSuggestions(nonTerminal, entries, terminal);
+  } else if (firstFollowConflicts.length > 0) {
+    conflictType = 'First-Follow冲突';
+    const pairs = firstFollowConflicts.map(c => `产生式(${c.firstProd}) 的First集包含 "${terminal}"，而产生式(${c.followProd}) 通过Follow集引入 "${terminal}"`).join('；');
+    reason = pairs;
+    suggestions = generateFirstFollowSuggestions(nonTerminal, terminal, entries, first, follow);
+  } else {
+    conflictType = 'Follow-Follow冲突';
+    const pairs = followFollowConflicts.map(c => `(${c.prod1}) 与 (${c.prod2})`).join('、');
+    reason = `多个可空产生式的Follow集都包含 "${terminal}"：${pairs}。`;
+    suggestions = ['考虑合并产生式，或改写文法消除多个可空候选。'];
+  }
+  
+  return {
+    type: conflictType,
+    reason,
+    suggestions
+  };
+}
+
+function generateLeftFactoringSuggestions(nonTerminal, entries, terminal) {
+  const suggestions = [];
+  const bodies = entries.map(e => e.body.length === 0 ? [EPSILON] : e.body);
+  
+  const prefixMap = new Map();
+  for (const body of bodies) {
+    const prefix = body.length > 0 ? body[0] : EPSILON;
+    if (!prefixMap.has(prefix)) prefixMap.set(prefix, []);
+    prefixMap.get(prefix).push(body.join(' ') || EPSILON);
+  }
+  
+  const commonPrefixes = [];
+  const maxLen = Math.min(...bodies.map(b => b.length));
+  for (let len = 1; len <= maxLen; len++) {
+    const prefixGroups = new Map();
+    for (const body of bodies) {
+      const prefix = body.slice(0, len).join(' ');
+      if (!prefixGroups.has(prefix)) prefixGroups.set(prefix, []);
+      prefixGroups.get(prefix).push(body.join(' ') || EPSILON);
+    }
+    for (const [prefix, group] of prefixGroups) {
+      if (group.length >= 2) {
+        commonPrefixes.push({ prefix, group });
+      }
+    }
+  }
+  
+  if (commonPrefixes.length > 0) {
+    const best = commonPrefixes[commonPrefixes.length - 1];
+    suggestions.push(
+      `【提取左因子】这些产生式存在公共前缀 "${best.prefix}"，可以提取左因子：`,
+      `  原产生式: ${best.group.map(g => nonTerminal + ' → ' + g).join(' | ')}`,
+      `  改写为: ${nonTerminal} → ${best.prefix} ${nonTerminal}'`,
+      `         ${nonTerminal}' → ${best.group.map(g => {
+        const rest = g.substring(best.prefix.length).trim();
+        return rest || EPSILON;
+      }).join(' | ')}`
+    );
+  } else {
+    suggestions.push(
+      `【消除公共前缀】以下产生式对输入 "${terminal}" 存在歧义，需要提取左因子或改写：`,
+      ...entries.map(e => `  · ${e.head} → ${e.body.length === 0 ? EPSILON : e.body.join(' ')}`)
+    );
+  }
+  
+  return suggestions;
+}
+
+function generateFirstFollowSuggestions(nonTerminal, terminal, entries, first, follow) {
+  const suggestions = [];
+  const firstEntries = entries.filter(e => e.addedVia === 'first');
+  const followEntries = entries.filter(e => e.addedVia === 'follow');
+  
+  suggestions.push('First-Follow冲突的消解方案：');
+  
+  if (followEntries.length > 0) {
+    const nullableProds = followEntries.map(e => `${e.head} → ${e.body.length === 0 ? EPSILON : e.body.join(' ')}`);
+    suggestions.push(
+      `【方案1: 消除ε产生式】以下产生式可推出ε，导致Follow集被引入：`,
+      ...nullableProds.map(p => `  · ${p}`),
+      `  可以考虑将ε产生式改写，将其展开到调用 ${nonTerminal} 的产生式中。`
+    );
+  }
+  
+  if (firstEntries.length > 0) {
+    const firstProds = firstEntries.map(e => `${e.head} → ${e.body.length === 0 ? EPSILON : e.body.join(' ')}`);
+    suggestions.push(
+      `【方案2: 改写First集冲突的产生式】以下产生式的First集包含 "${terminal}"：`,
+      ...firstProds.map(p => `  · ${p}`),
+      `  可以通过提取左因子或重新设计文法来消除歧义。`
+    );
+  }
+  
+  const followSet = [...follow.get(nonTerminal)].join(', ');
+  suggestions.push(
+    `【诊断信息】Follow(${nonTerminal}) = {${followSet}}`,
+    `  终结符 "${terminal}" 同时出现在某产生式的First集和Follow集中。`
+  );
+  
+  return suggestions;
 }
 
 export function simulateLL1(input, productions, table, first) {
