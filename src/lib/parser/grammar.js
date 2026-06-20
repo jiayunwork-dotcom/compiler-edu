@@ -175,6 +175,41 @@ export function computeFollow(productions, firstSet) {
   const start = getStartSymbol(productions);
   const steps = [];
   
+  let firstStringFn = firstSet;
+  if (typeof firstStringFn !== 'function') {
+    if (firstSet instanceof Map) {
+      const firstMap = firstSet;
+      firstStringFn = function(symbols) {
+        const result = new Set();
+        if (symbols.length === 0) {
+          result.add(EPSILON);
+          return result;
+        }
+        let allHaveEpsilon = true;
+        for (let i = 0; i < symbols.length; i++) {
+          const sym = symbols[i];
+          const fs = firstMap.get(sym);
+          if (!fs) {
+            result.add(sym);
+            allHaveEpsilon = false;
+            break;
+          }
+          for (const s of fs) {
+            if (s !== EPSILON) result.add(s);
+          }
+          if (!fs.has(EPSILON)) {
+            allHaveEpsilon = false;
+            break;
+          }
+        }
+        if (allHaveEpsilon) result.add(EPSILON);
+        return result;
+      };
+    } else {
+      throw new Error('computeFollow: firstSet 参数必须是函数或 Map 对象');
+    }
+  }
+  
   for (const nt of nonTerminals) {
     follow.set(nt, new Set());
   }
@@ -206,7 +241,7 @@ export function computeFollow(productions, firstSet) {
             follow.get(B).add(s);
           }
         } else {
-          const firstBeta = firstSet(beta);
+          const firstBeta = firstStringFn(beta);
           for (const s of firstBeta) {
             if (s !== EPSILON) follow.get(B).add(s);
           }

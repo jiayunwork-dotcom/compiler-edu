@@ -47,9 +47,25 @@
   function analyze() {
     try {
       productions = parseGrammar(grammarText);
+      if (!productions || productions.length === 0) {
+        throw new Error('无法解析文法，请检查文法格式是否正确');
+      }
+      
       firstResult = computeFirst(productions);
-      followResult = computeFollow(productions, firstResult.computeFirstString);
+      if (!firstResult || !firstResult.first || !(firstResult.first instanceof Map)) {
+        throw new Error('First集计算失败');
+      }
+      
+      followResult = computeFollow(productions, firstResult.first);
+      if (!followResult || !followResult.follow || !(followResult.follow instanceof Map)) {
+        throw new Error('Follow集计算失败');
+      }
+      
       tableResult = buildLL1Table(productions, firstResult.first, followResult.follow);
+      if (!tableResult || !tableResult.table) {
+        throw new Error('预测分析表构建失败');
+      }
+      
       simResult = null;
       simStep = 0;
       showTree = false;
@@ -131,12 +147,12 @@
           {showFirstSteps ? '隐藏步骤' : '展开计算过程'}
         </button>
       </div>
-      {#if firstResult}
+      {#if firstResult && firstResult.steps && firstResult.steps.length > 0}
         <div class="sets-grid">
           {#each Object.entries(firstResult.steps[firstResult.steps.length - 1].first) as [sym, set]}
             {#if /[A-Z]/.test(sym[0])}
               <div class="set-item">
-                <strong>First({sym})</strong> = {'{' + set.join(', ') + '}'}
+                <strong>First({sym})</strong> = {'{' + (Array.isArray(set) ? set.join(', ') : '') + '}'}
               </div>
             {/if}
           {/each}
@@ -169,11 +185,11 @@
           {showFollowSteps ? '隐藏步骤' : '展开计算过程'}
         </button>
       </div>
-      {#if followResult}
+      {#if followResult && followResult.steps && followResult.steps.length > 0}
         <div class="sets-grid">
           {#each Object.entries(followResult.steps[followResult.steps.length - 1].follow) as [sym, set]}
             <div class="set-item">
-              <strong>Follow({sym})</strong> = {'{' + set.join(', ') + '}'}
+              <strong>Follow({sym})</strong> = {'{' + (Array.isArray(set) ? set.join(', ') : '') + '}'}
             </div>
           {/each}
         </div>
