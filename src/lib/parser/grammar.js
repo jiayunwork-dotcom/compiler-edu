@@ -272,7 +272,10 @@ export function buildLL1Table(productions, first, follow) {
     }
   }
   
-  const prodEntries = new Map();
+  function ensureCell(nt, t) {
+    if (!table[nt]) table[nt] = {};
+    if (!table[nt][t]) table[nt][t] = [];
+  }
   
   for (let i = 0; i < productions.length; i++) {
     const prod = productions[i];
@@ -287,7 +290,7 @@ export function buildLL1Table(productions, first, follow) {
       let allHaveEpsilon = true;
       for (const sym of body) {
         const fs = first.get(sym);
-        if (fs) {
+        if (fs && typeof fs.has === 'function') {
           for (const s of fs) if (s !== EPSILON) firstBody.add(s);
           if (!fs.has(EPSILON)) { allHaveEpsilon = false; break; }
         } else {
@@ -309,33 +312,61 @@ export function buildLL1Table(productions, first, follow) {
     
     for (const t of firstBody) {
       if (t !== EPSILON) {
+        ensureCell(A, t);
         table[A][t].push({ ...entryInfo, addedVia: 'first' });
       }
     }
     
     if (firstBody.has(EPSILON)) {
-      for (const t of follow.get(A)) {
-        table[A][t].push({ ...entryInfo, addedVia: 'follow' });
+      const followSet = follow.get(A);
+      if (followSet && followSet[Symbol.iterator]) {
+        for (const t of followSet) {
+          ensureCell(A, t);
+          table[A][t].push({ ...entryInfo, addedVia: 'follow' });
+        }
       }
     }
   }
+  
+  const allSymbols = new Set(symbols);
+  for (const nt of nonTerminals) {
+    for (const t of Object.keys(table[nt] || {})) {
+      allSymbols.add(t);
+    }
+  }
+  const allSymbolsArray = [...allSymbols];
   
   for (const nt of nonTerminals) {
-    for (const t of symbols) {
-      if (table[nt][t].length > 1) {
-        const entries = table[nt][t];
-        const diagnosis = diagnoseConflict(nt, t, entries, first, follow);
-        conflicts.push({ 
-          nonTerminal: nt, 
-          terminal: t, 
-          entries,
-          diagnosis
-        });
+    for (const t of allSymbolsArray) {
+      const cell = table[nt]?.[t];
+      if (cell && cell.length > 1) {
+        const entries = cell;
+        try {
+          const diagnosis = diagnoseConflict(nt, t, entries, first, follow);
+          conflicts.push({ 
+            nonTerminal: nt, 
+            terminal: t, 
+            entries,
+            diagnosis
+          });
+        } catch (e) {
+          console.warn('Conflict diagnosis failed:', e);
+          conflicts.push({
+            nonTerminal: nt,
+            terminal: t,
+            entries,
+            diagnosis: {
+              type: '未知冲突',
+              reason: '冲突诊断过程中出现错误，请检查文法定义。',
+              suggestions: ['请尝试消除左递归、提取左因子，或改写文法使其符合LL(1)文法要求。']
+            }
+          });
+        }
       }
     }
   }
   
-  return { table, terminals: symbols, nonTerminals, conflicts };
+  return { table, terminals: allSymbolsArray, nonTerminals, conflicts };
 }
 
 function diagnoseConflict(nonTerminal, terminal, entries, first, follow) {

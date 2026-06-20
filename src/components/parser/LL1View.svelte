@@ -224,13 +224,14 @@
               <tr>
                 <td><strong>{nt}</strong></td>
                 {#each tableResult.terminals as t}
-                  {@const entries = tableResult.table[nt][t]}
+                  {@const cell = tableResult.table[nt]?.[t]}
+                  {@const entries = Array.isArray(cell) ? cell : []}
                   {@const isConflict = entries.length > 1}
                   <td class:conflict={isConflict}
                       on:mouseenter={(e) => isConflict && showTooltip(e, nt, t)}
                       on:mouseleave={hideTooltip}>
                     {#each entries as e, ei}
-                      {e.head} → {e.body.length === 0 ? 'ε' : e.body.join(' ')}
+                      {e.head} → {e.body.length === 0 ? 'ε' : (e.body.join ? e.body.join(' ') : String(e.body))}
                       {#if ei < entries.length - 1}<br />{/if}
                     {/each}
                   </td>
