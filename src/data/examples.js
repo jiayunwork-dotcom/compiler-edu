@@ -69,5 +69,88 @@ if (x > 0) {
   "name": "test",
   "value": 123,
   "items": [1, 2, 3]
+}`,
+  semantic_demo1: `// 示例1: 基础变量声明、函数与作用域
+int global_count = 100;
+float global_pi = 3.14159;
+
+int add(int a, int b) {
+  int result = a + b;
+  return result;
+}
+
+float calculate_area(float radius) {
+  float pi = 3.14159;
+  float area = pi * radius * radius;
+  return area;
+}
+
+int main() {
+  int x = 10;
+  int y = 20;
+  int sum = add(x, y);
+  float r = 5.5;
+  float a = calculate_area(r);
+  bool positive = (sum > 0);
+  return 0;
+}`,
+  semantic_demo2: `// 示例2: 包含多种类型错误的演示代码
+int x = 42;
+float y = 3.14;
+bool flag = true;
+
+// 错误1: bool不能参与算术运算
+int error1 = x + flag;
+
+// 错误2: 不能将float赋给int
+int error2 = y;
+
+// 错误3: 函数参数类型不匹配
+float square(float num) {
+  return num * num;
+}
+int z = square(flag);
+
+// 错误4: if条件必须是bool
+if (x) {
+  int w = 1;
+}
+
+// 错误5: 未定义的变量
+int result = undefined_var + 1;
+
+// 正确: int与float运算结果为float(隐式提升)
+float mixed = x + y;
+return 0;`,
+  semantic_demo3: `// 示例3: 嵌套作用域与变量遮蔽演示
+int level0 = 0;
+
+void scope_demo() {
+  int level1 = 1;
+  float shared = 1.5;
+
+  if (level1 > 0) {
+    int level2 = 2;
+    float shared = 2.5;
+    {
+      int level3 = 3;
+      float shared = 3.5;
+      bool ok = true;
+    }
+  }
+
+  while (level1 < 5) {
+    int loop_var = level1 * 2;
+    level1 = level1 + 1;
+  }
+}
+
+void outer() {
+  int a = 10;
+  {
+    int a = 20;
+    int b = a + 1;
+  }
+  int c = a + 1;
 }`
 };
