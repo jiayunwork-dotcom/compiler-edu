@@ -1,0 +1,178 @@
+:root {
+  --color-primary: #4f46e5;
+  --color-primary-light: #818cf8;
+  --color-secondary: #0ea5e9;
+  --color-success: #10b981;
+  --color-warning: #f59e0b;
+  --color-danger: #ef4444;
+  --color-gold: #fbbf24;
+  --color-bg: #f8fafc;
+  --color-bg-dark: #1e293b;
+  --color-surface: #ffffff;
+  --color-surface-alt: #f1f5f9;
+  --color-text: #0f172a;
+  --color-text-muted: #64748b;
+  --color-border: #e2e8f0;
+  
+  --token-keyword: #7c3aed;
+  --token-identifier: #0369a1;
+  --token-number: #dc2626;
+  --token-operator: #059669;
+  --token-separator: #6b7280;
+  --token-string: #d97706;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+#app {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  margin: 0;
+  font-weight: 600;
+}
+
+h1 { font-size: 1.5rem; }
+h2 { font-size: 1.25rem; }
+h3 { font-size: 1.1rem; }
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  transition: all 0.15s;
+}
+
+button:hover:not(:disabled) {
+  background: var(--color-surface-alt);
+  border-color: var(--color-primary-light);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button.primary {
+  background: var(--color-primary);
+  color: white;
+  border-color: var(--color-primary);
+}
+
+button.primary:hover:not(:disabled) {
+  background: #4338ca;
+}
+
+button.success {
+  background: var(--color-success);
+  color: white;
+  border-color: var(--color-success);
+}
+
+button.danger {
+  background: var(--color-danger);
+  color: white;
+  border-color: var(--color-danger);
+}
+
+textarea, input, select {
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 13px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+textarea:focus, input:focus, select:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+}
+
+pre, code {
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+}
+
+.panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.panel-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.flex { display: flex; }
+.flex-col { flex-direction: column; }
+.items-center { align-items: center; }
+.justify-between { justify-content: space-between; }
+.gap-2 { gap: 8px; }
+.gap-4 { gap: 16px; }
+.w-full { width: 100%; }
+.h-full { height: 100%; }
+.overflow-auto { overflow: auto; }
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.badge-keyword { background: #ede9fe; color: var(--token-keyword); }
+.badge-identifier { background: #e0f2fe; color: var(--token-identifier); }
+.badge-number { background: #fee2e2; color: var(--token-number); }
+.badge-operator { background: #d1fae5; color: var(--token-operator); }
+.badge-separator { background: #f1f5f9; color: var(--token-separator); }
+.badge-string { background: #fef3c7; color: var(--token-string); }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+th, td {
+  border: 1px solid var(--color-border);
+  padding: 6px 10px;
+  text-align: center;
+}
+
+th {
+  background: var(--color-surface-alt);
+  font-weight: 600;
+}
+
+td.shift { background: #dbeafe; }
+td.reduce { background: #dcfce7; }
+td.accept { background: #fef3c7; }
+td.conflict { background: #fee2e2; color: var(--color-danger); font-weight: 600; }
