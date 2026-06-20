@@ -62,6 +62,11 @@
     dispatch('symbolSelect', sym);
   }
 
+  function handleRename(e) {
+    if (e) e.stopPropagation();
+    dispatch('renameRequest');
+  }
+
   function scopeKindLabel(kind) {
     switch (kind) {
       case 'global': return '🌐';
@@ -234,7 +239,15 @@
 
   {#if selectedSymbol}
     <div class="symbol-details">
-      <div class="details-title">符号详情</div>
+      <div class="details-header">
+        <div class="details-title">符号详情</div>
+        <button
+          class="rename-btn"
+          on:click={handleRename}
+          title="重命名此符号（替换所有声明和引用）">
+          🔄 重命名
+        </button>
+      </div>
       <div class="details-grid">
         <div class="detail-label">名称</div>
         <div class="detail-value"><strong>{selectedSymbol.name}</strong></div>
@@ -257,6 +270,19 @@
         <div class="detail-label">引用次数</div>
         <div class="detail-value">{selectedSymbol.references?.length || 0} 次</div>
       </div>
+      {#if selectedSymbol.references && selectedSymbol.references.length > 0}
+        <div class="references-list">
+          <div class="refs-title">引用位置:</div>
+          {#each selectedSymbol.references as ref, idx}
+            <span class="ref-item" title="第{ref.line}行引用">
+              L{ref.line}
+            </span>
+            {#if idx < selectedSymbol.references.length - 1}
+              <span class="ref-sep">,</span>
+            {/if}
+          {/each}
+        </div>
+      {/if}
     </div>
   {/if}
 </div>
@@ -497,13 +523,38 @@
     border-radius: 6px;
   }
 
+  .details-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+
   .details-title {
     font-weight: 600;
     font-size: 12px;
     color: var(--color-primary);
-    margin-bottom: 8px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
+  }
+
+  .rename-btn {
+    padding: 5px 12px;
+    font-size: 11px;
+    font-weight: 600;
+    border: 1px solid var(--color-primary);
+    background: rgba(79, 70, 229, 0.08);
+    color: var(--color-primary);
+    border-radius: 5px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .rename-btn:hover {
+    background: var(--color-primary);
+    color: white;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(79, 70, 229, 0.3);
   }
 
   .details-grid {
@@ -519,5 +570,34 @@
 
   .detail-value {
     color: var(--color-text);
+  }
+
+  .references-list {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--color-border);
+    font-size: 11px;
+  }
+
+  .refs-title {
+    color: var(--color-text-muted);
+    margin-bottom: 4px;
+    font-weight: 600;
+  }
+
+  .ref-item {
+    display: inline-block;
+    padding: 1px 6px;
+    background: rgba(14, 165, 233, 0.1);
+    color: #0369a1;
+    border-radius: 4px;
+    font-family: monospace;
+    font-weight: 600;
+    margin-right: 2px;
+  }
+
+  .ref-sep {
+    color: var(--color-text-muted);
+    margin-right: 4px;
   }
 </style>

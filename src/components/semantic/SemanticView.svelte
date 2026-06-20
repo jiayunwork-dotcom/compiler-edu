@@ -4,7 +4,15 @@
   import SymbolTablePanel from './SymbolTablePanel.svelte';
   import TypeCheckPanel from './TypeCheckPanel.svelte';
   import ScopeVisualPanel from './ScopeVisualPanel.svelte';
-  import { analyzeSemantics, findScopeAtLine, getVisibleSymbols } from '../../lib/semantic/index.js';
+  import {
+    analyzeSemantics,
+    findScopeAtLine,
+    getVisibleSymbols,
+    checkRenameConflict,
+    applyRename,
+    computeVariableLifecycles,
+    computeInlineTypeAnnotations
+  } from '../../lib/semantic/index.js';
   import { DEFAULT_CODE_SAMPLES } from '../../data/examples.js';
 
   let sourceCode = DEFAULT_CODE_SAMPLES.semantic_demo1;
@@ -26,14 +34,39 @@
   let errorRanges = [];
   let visibleSymbols = [];
 
+  let showRenameDialog = false;
+  let renameInput = '';
+  let renameError = '';
+
+  let variableLifecycles = new Map();
+  let inlineTypeAnnotations = new Map();
+  let totalLines = 1;
+
   function runAnalysis() {
     try {
       analysisResult = analyzeSemantics(sourceCode);
+      totalLines = sourceCode.split('\n').length;
+      if (analysisResult && analysisResult.allScopes) {
+        variableLifecycles = computeVariableLifecycles(analysisResult.allScopes, totalLines);
+      } else {
+        variableLifecycles = new Map();
+      }
+      if (analysisResult && analysisResult.ast && analysisResult.nodeTypes && analysisResult.globalScope) {
+        inlineTypeAnnotations = computeInlineTypeAnnotations(
+          analysisResult.ast,
+          analysisResult.nodeTypes,
+          analysisResult.globalScope
+        );
+      } else {
+        inlineTypeAnnotations = new Map();
+      }
       updateHighlights();
       updateCursorScope();
     } catch (e) {
       console.error('分析出错:', e);
       analysisResult = null;
+      variableLifecycles = new Map();
+      inlineTypeAnnotations = new Map();
     }
   }
 
@@ -155,8 +188,59 @@
     updateHighlights();
   }
 
+  function handleQuickFix(newSource) {
+    if (newSource && newSource !== sourceCode) {
+      sourceCode = newSource;
+      selectedSymbol = null;
+      selectedError = null;
+    }
+  }
+
+  function handleRenameRequest() {
+    if (!selectedSymbol) return;
+    renameInput = selectedSymbol.name;
+    renameError = '';
+    showRenameDialog = true;
+  }
+
+  function handleRenameConfirm() {
+    if (!selectedSymbol || !renameInput.trim()) return;
+    const newName = renameInput.trim();
+    if (newName === selectedSymbol.name) {
+      showRenameDialog = false;
+      return;
+    }
+    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(newName)) {
+      renameError = '新名称格式不正确，必须以字母或下划线开头，只能包含字母、数字和下划线';
+      return;
+    }
+    const conflict = checkRenameConflict(selectedSymbol, newName, analysisResult.allScopes);
+    if (conflict.conflict) {
+      renameError = conflict.message;
+      return;
+    }
+    const newSource = applyRename(sourceCode, selectedSymbol, newName);
+    sourceCode = newSource;
+    selectedSymbol = null;
+    showRenameDialog = false;
+  }
+
+  function handleRenameCancel() {
+    showRenameDialog = false;
+    renameError = '';
+  }
+
+  function handleRenameKeydown(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleRenameConfirm();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      handleRenameCancel();
+    }
+  }
+
   $: if (analysisResult && selectedSymbol) {
-    // reactive side effect handled in functions above
   }
 
   function loadSample(key) {
@@ -206,12 +290,13 @@
             bind:value={sourceCode}
             {highlightRanges}
             {errorRanges}
+            {inlineTypeAnnotations}
             on:input={(e) => { sourceCode = e.detail; }}
             on:cursorChange={handleCursorChange}
           />
         </div>
         <div class="editor-tips">
-          <span class="tip">💡 移动光标查看作用域 · 红色波浪线为类型错误 · 悬停查看错误详情</span>
+          <span class="tip">💡 移动光标查看作用域 · 红色波浪线为类型错误 · 悬停查看错误详情 · 行尾灰色文字为类型标注</span>
         </div>
       </div>
 
@@ -232,6 +317,8 @@
             allScopes={analysisResult?.allScopes || []}
             {highlightedScope}
             {flashingSymbol}
+            {variableLifecycles}
+            {totalLines}
             on:scopeSelect={(e) => handleScopeSelect(e.detail)}
           />
         </div>
@@ -267,18 +354,62 @@
             {highlightedScope}
             visibleSymbols={visibleSymbols}
             on:symbolSelect={(e) => handleSymbolSelect(e.detail)}
+            on:renameRequest={handleRenameRequest}
           />
         {:else}
           <TypeCheckPanel
             errors={analysisResult?.typeErrors || []}
             {selectedError}
             highlightSymbol={selectedSymbol}
+            ast={analysisResult?.ast}
+            allSymbols={analysisResult?.allSymbols || []}
+            {sourceCode}
             on:errorSelect={(e) => handleErrorSelect(e.detail)}
+            on:quickFix={(e) => handleQuickFix(e.detail)}
           />
         {/if}
       </div>
     </div>
   </div>
+
+  {#if showRenameDialog}
+    <div class="modal-overlay" on:click={handleRenameCancel}>
+      <div class="modal-dialog rename-dialog" on:click|stopPropagation>
+        <div class="modal-header">
+          <h4>🔄 重命名符号</h4>
+          <button class="close-btn" on:click={handleRenameCancel}>✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="rename-info">
+            <span class="rename-label">原符号:</span>
+            <span class="rename-old-name">{selectedSymbol?.name}</span>
+            <span class="rename-type-badge">{selectedSymbol?.dataType}</span>
+          </div>
+          <div class="form-group">
+            <label>新名称:</label>
+            <input
+              type="text"
+              bind:value={renameInput}
+              placeholder="输入新的符号名称"
+              on:keydown={handleRenameKeydown}
+              class:input-error={renameError}
+              autofocus
+            />
+            {#if renameError}
+              <div class="field-error">⚠️ {renameError}</div>
+            {/if}
+          </div>
+          <div class="rename-hint">
+            💡 将替换声明位置和所有引用位置（共 {(selectedSymbol?.references?.length || 0) + 1} 处）
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" on:click={handleRenameCancel}>取消</button>
+          <button class="btn-primary" on:click={handleRenameConfirm}>确认重命名</button>
+        </div>
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -472,6 +603,195 @@
 
   .scope-label strong {
     color: var(--color-primary);
+  }
+
+  .modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    backdrop-filter: blur(2px);
+  }
+
+  .modal-dialog {
+    background: white;
+    border-radius: 10px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    min-width: 420px;
+    max-width: 90vw;
+    overflow: hidden;
+    animation: modal-in 0.2s ease-out;
+  }
+
+  @keyframes modal-in {
+    from { opacity: 0; transform: translateY(-10px) scale(0.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  .rename-dialog {
+    width: 460px;
+  }
+
+  .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-surface-alt);
+  }
+
+  .modal-header h4 {
+    margin: 0;
+    font-size: 15px;
+    color: var(--color-text);
+  }
+
+  .close-btn {
+    background: transparent;
+    border: none;
+    font-size: 16px;
+    color: var(--color-text-muted);
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    line-height: 1;
+  }
+
+  .close-btn:hover {
+    background: var(--color-border);
+    color: var(--color-text);
+  }
+
+  .modal-body {
+    padding: 18px;
+  }
+
+  .rename-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 14px;
+    padding: 10px 12px;
+    background: var(--color-surface-alt);
+    border-radius: 6px;
+  }
+
+  .rename-label {
+    font-size: 12px;
+    color: var(--color-text-muted);
+  }
+
+  .rename-old-name {
+    font-family: monospace;
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--color-text);
+  }
+
+  .rename-type-badge {
+    font-family: monospace;
+    font-size: 11px;
+    padding: 1px 8px;
+    background: rgba(79, 70, 229, 0.1);
+    color: #4f46e5;
+    border-radius: 10px;
+    font-weight: 600;
+  }
+
+  .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .form-group label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-text-muted);
+  }
+
+  .form-group input {
+    padding: 9px 12px;
+    font-size: 14px;
+    font-family: monospace;
+    border: 1.5px solid var(--color-border);
+    border-radius: 6px;
+    outline: none;
+    transition: all 0.15s;
+  }
+
+  .form-group input:focus {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15);
+  }
+
+  .form-group input.input-error {
+    border-color: #dc2626;
+    box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.1);
+  }
+
+  .field-error {
+    font-size: 12px;
+    color: #dc2626;
+    padding: 4px 0;
+  }
+
+  .rename-hint {
+    margin-top: 12px;
+    padding: 8px 12px;
+    background: rgba(14, 165, 233, 0.06);
+    border: 1px solid rgba(14, 165, 233, 0.15);
+    border-radius: 6px;
+    font-size: 12px;
+    color: #0369a1;
+  }
+
+  .modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 14px 18px;
+    border-top: 1px solid var(--color-border);
+    background: var(--color-surface-alt);
+  }
+
+  .btn-secondary,
+  .btn-primary {
+    padding: 8px 16px;
+    font-size: 13px;
+    font-weight: 500;
+    border-radius: 6px;
+    cursor: pointer;
+    border: none;
+    transition: all 0.15s;
+  }
+
+  .btn-secondary {
+    background: var(--color-surface);
+    color: var(--color-text-muted);
+    border: 1px solid var(--color-border);
+  }
+
+  .btn-secondary:hover {
+    background: var(--color-border);
+    color: var(--color-text);
+  }
+
+  .btn-primary {
+    background: linear-gradient(135deg, #4f46e5, #6366f1);
+    color: white;
+  }
+
+  .btn-primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(79, 70, 229, 0.35);
   }
 
   @media (max-width: 1100px) {

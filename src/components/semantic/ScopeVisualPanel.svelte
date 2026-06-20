@@ -5,6 +5,8 @@
   export let allScopes = [];
   export let highlightedScope = null;
   export let flashingSymbol = null;
+  export let variableLifecycles = new Map();
+  export let totalLines = 1;
 
   const dispatch = createEventDispatcher();
 
@@ -62,6 +64,51 @@
     return colors[kind] || colors.block;
   }
 
+  function lifecycleBarColor(dataType, isUnused) {
+    if (isUnused) return '#94a3b8';
+    switch (dataType) {
+      case 'int': return '#dc2626';
+      case 'float': return '#ea580c';
+      case 'bool': return '#7c3aed';
+      default: return '#0ea5e9';
+    }
+  }
+
+  function lifecycleBarBgColor(dataType, isUnused) {
+    if (isUnused) return '#e2e8f0';
+    switch (dataType) {
+      case 'int': return 'rgba(220, 38, 38, 0.15)';
+      case 'float': return 'rgba(234, 88, 12, 0.15)';
+      case 'bool': return 'rgba(124, 58, 237, 0.15)';
+      default: return 'rgba(14, 165, 233, 0.15)';
+    }
+  }
+
+  function getLifecycleTooltip(lc) {
+    if (lc.isUnused) {
+      return `声明于L${lc.declaredLine}, 从未被引用 (可能是无用变量)`;
+    }
+    return `声明于L${lc.declaredLine}, 最后引用于L${lc.lastRefLine}`;
+  }
+
+  function computeBarLeftPercent(scope, lc) {
+    const scopeRange = (scope.lineEnd || totalLines) - scope.line + 1;
+    const offset = lc.declaredLine - scope.line;
+    return Math.max(0, Math.min(100, (offset / Math.max(1, scopeRange)) * 100));
+  }
+
+  function computeBarWidthPercent(scope, lc) {
+    const scopeRange = (scope.lineEnd || totalLines) - scope.line + 1;
+    const startOffset = lc.declaredLine - scope.line;
+    const endOffset = lc.endLine - scope.line;
+    const barRange = lc.isUnused ? 0.5 : Math.max(1, endOffset - startOffset + 1);
+    return Math.max(1.5, Math.min(100, (barRange / Math.max(1, scopeRange)) * 100));
+  }
+
+  function getScopeVars(scope) {
+    return variableLifecycles.get(scope.id) || [];
+  }
+
   function isHighlighted(scope) {
     return highlightedScope && highlightedScope.id === scope.id;
   }
@@ -96,6 +143,15 @@
         <span class="legend-box" style="background: rgba(16,185,129,0.10); border-color: #10b981;"></span>
         块
       </span>
+      <span class="legend-sep">|</span>
+      <span class="legend-item">
+        <span class="legend-bar"></span>
+        变量生命周期
+      </span>
+      <span class="legend-item">
+        <span class="legend-bar unused-bar"></span>
+        未引用变量
+      </span>
     </div>
     {#if highlightedScope}
       <div class="current-scope">
@@ -121,6 +177,8 @@
         {@const flashing = hasSymbolFlashing(scope)}
         {@const collapsed = isCollapsed(scope)}
         {@const hasChild = hasChildren(scope)}
+        {@const scopeVars = getScopeVars(scope)}
+        {@const hasVars = scopeVars && scopeVars.length > 0}
         <div class="scope-rect scope-{scope.kind}"
              class:scope-highlighted={hl}
              class:scope-flashing={flashing}
@@ -160,6 +218,56 @@
             </div>
           {/if}
 
+          {#if hasVars}
+            <div class="lifecycle-section">
+              <div class="lifecycle-title">
+                <span>📊 变量生命周期</span>
+                <span class="lifecycle-scale">
+                  <span>L{scope.line}</span>
+                  <span class="scale-spacer"></span>
+                  <span>L{scope.lineEnd || totalLines}</span>
+                </span>
+              </div>
+              <div class="lifecycle-bars">
+                {#each scopeVars as lc, lcIdx}
+                  <div class="lifecycle-row">
+                    <span
+                      class="lifecycle-name"
+                      class:unused-name={lc.isUnused}
+                      title="{lc.name}: {lc.dataType}">
+                      {lc.name}
+                    </span>
+                    <div class="lifecycle-bar-track">
+                      <div
+                        class="lifecycle-bar"
+                        class:unused-bar={lc.isUnused}
+                        class:point-bar={lc.isUnused}
+                        style="
+                          left: {computeBarLeftPercent(scope, lc)}%;
+                          width: {computeBarWidthPercent(scope, lc)}%;
+                          background: {lifecycleBarBgColor(lc.dataType, lc.isUnused)};
+                          border-color: {lifecycleBarColor(lc.dataType, lc.isUnused)};
+                        "
+                        title="{getLifecycleTooltip(lc)}">
+                        {#if !lc.isUnused}
+                          <div
+                            class="bar-fill"
+                            style="background: {lifecycleBarColor(lc.dataType, lc.isUnused)};"></div>
+                        {/if}
+                        <span class="bar-decl-marker"
+                              style="background: {lifecycleBarColor(lc.dataType, lc.isUnused)};"></span>
+                      </div>
+                    </div>
+                    <span class="lifecycle-type"
+                          style="color: {lifecycleBarColor(lc.dataType, lc.isUnused)};">
+                      {lc.dataType}
+                    </span>
+                  </div>
+                {/each}
+              </div>
+            </div>
+          {/if}
+
           {#if collapsed && hasChild}
             <div class="collapsed-hint">
               + {scope.children.length} 个子作用域已折叠
@@ -171,7 +279,7 @@
   {/if}
 
   <div class="tip-bar">
-    💡 提示: 在源码中移动光标可高亮对应作用域 · 点击矩形可选中 · 使用 ⊞/⊟ 按钮折叠展开
+    💡 提示: 在源码中移动光标可高亮对应作用域 · 点击矩形可选中 · 使用 ⊞/⊟ 按钮折叠展开 · 条形图显示变量生命周期（声明到最后引用）
   </div>
 </div>
 
@@ -223,6 +331,42 @@
     height: 14px;
     border: 1.5px solid;
     border-radius: 3px;
+  }
+
+  .legend-sep {
+    color: var(--color-border);
+    font-weight: 600;
+  }
+
+  .legend-bar {
+    display: inline-block;
+    width: 28px;
+    height: 10px;
+    background: rgba(14, 165, 233, 0.15);
+    border: 1px solid #0ea5e9;
+    border-radius: 3px;
+    position: relative;
+  }
+
+  .legend-bar::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 60%;
+    background: #0ea5e9;
+    border-radius: 2px;
+  }
+
+  .unused-bar {
+    background: #e2e8f0;
+    border-color: #94a3b8;
+    width: 10px !important;
+  }
+
+  .unused-bar::after {
+    display: none;
   }
 
   .current-scope {
@@ -380,6 +524,7 @@
     display: flex;
     flex-wrap: wrap;
     gap: 4px;
+    margin-bottom: 8px;
   }
 
   .mini-symbol {
@@ -422,6 +567,162 @@
     background: var(--color-surface-alt);
     border-radius: 3px;
     color: var(--color-text-muted);
+  }
+
+  .lifecycle-section {
+    margin-top: 6px;
+    padding: 8px 10px;
+    background: rgba(255, 255, 255, 0.6);
+    border: 1px dashed rgba(0, 0, 0, 0.08);
+    border-radius: 5px;
+  }
+
+  .lifecycle-title {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--color-text-muted);
+  }
+
+  .lifecycle-scale {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: monospace;
+    font-weight: 500;
+    font-size: 9px;
+    color: var(--color-text-muted);
+    opacity: 0.7;
+  }
+
+  .scale-spacer {
+    flex: 1;
+    min-width: 40px;
+    height: 1px;
+    background: var(--color-border);
+    position: relative;
+  }
+
+  .scale-spacer::before,
+  .scale-spacer::after {
+    content: '';
+    position: absolute;
+    top: -2px;
+    width: 1px;
+    height: 5px;
+    background: var(--color-border);
+  }
+
+  .scale-spacer::before { left: 0; }
+  .scale-spacer::after { right: 0; }
+
+  .lifecycle-bars {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .lifecycle-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .lifecycle-name {
+    font-size: 10px;
+    font-family: monospace;
+    font-weight: 600;
+    color: var(--color-text);
+    min-width: 50px;
+    max-width: 80px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .unused-name {
+    text-decoration: line-through;
+    text-decoration-color: #94a3b8;
+    opacity: 0.7;
+  }
+
+  .lifecycle-bar-track {
+    flex: 1;
+    height: 14px;
+    background: rgba(0, 0, 0, 0.03);
+    border-radius: 3px;
+    position: relative;
+    border: 1px solid rgba(0, 0, 0, 0.05);
+    min-width: 0;
+  }
+
+  .lifecycle-bar {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    height: 8px;
+    border-radius: 2px;
+    border: 1px solid;
+    transition: all 0.2s;
+    cursor: help;
+    overflow: visible;
+  }
+
+  .lifecycle-bar:hover {
+    filter: brightness(1.1);
+    z-index: 2;
+  }
+
+  .bar-fill {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 100%;
+    border-radius: 1px;
+    opacity: 0.85;
+  }
+
+  .bar-decl-marker {
+    position: absolute;
+    left: -1px;
+    top: -3px;
+    width: 3px;
+    height: 14px;
+    border-radius: 2px;
+    box-shadow: 0 0 4px currentColor;
+  }
+
+  .unused-bar {
+    background: #e2e8f0 !important;
+    border-color: #94a3b8 !important;
+    border-style: dashed !important;
+    height: 8px;
+  }
+
+  .point-bar {
+    min-width: 0 !important;
+    width: 8px !important;
+    border-radius: 50% !important;
+  }
+
+  .point-bar .bar-fill { display: none; }
+
+  .point-bar .bar-decl-marker { display: none; }
+
+  .lifecycle-type {
+    font-size: 9px;
+    font-family: monospace;
+    font-weight: 600;
+    padding: 1px 5px;
+    background: white;
+    border-radius: 3px;
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    flex-shrink: 0;
   }
 
   .collapsed-hint {

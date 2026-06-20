@@ -1,15 +1,60 @@
 <script>
   import { createEventDispatcher } from 'svelte';
+  import { generateQuickFixes } from '../../lib/semantic/index.js';
 
   export let errors = [];
   export let selectedError = null;
   export let highlightSymbol = null;
+  export let ast = null;
+  export let allSymbols = [];
+  export let sourceCode = '';
 
   const dispatch = createEventDispatcher();
+
+  let expandedFixes = new Set();
 
   function selectError(error, index) {
     selectedError = { error, index };
     dispatch('errorSelect', error);
+  }
+
+  function toggleFixes(error, idx, e) {
+    if (e) e.stopPropagation();
+    const key = `${idx}-${error.start}`;
+    if (expandedFixes.has(key)) {
+      expandedFixes.delete(key);
+    } else {
+      expandedFixes.add(key);
+    }
+    expandedFixes = new Set(expandedFixes);
+  }
+
+  function isFixesExpanded(error, idx) {
+    const key = `${idx}-${error.start}`;
+    return expandedFixes.has(key);
+  }
+
+  function getFixesFor(error) {
+    try {
+      return generateQuickFixes(error, ast, allSymbols, sourceCode);
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function applyFix(fix, error, idx, e) {
+    if (e) e.stopPropagation();
+    try {
+      const newSource = fix.apply();
+      if (newSource && newSource !== sourceCode) {
+        dispatch('quickFix', newSource);
+        const key = `${idx}-${error.start}`;
+        expandedFixes.delete(key);
+        expandedFixes = new Set(expandedFixes);
+      }
+    } catch (err) {
+      console.error('应用修复失败:', err);
+    }
   }
 
   function formatTypes(types) {
@@ -111,12 +156,16 @@
             <th style="width: 60px;">行号</th>
             <th>错误描述</th>
             <th style="width: 140px;">涉及类型</th>
+            <th style="width: 44px;">修复</th>
           </tr>
         </thead>
         <tbody>
           {#each errors as error, idx}
             {@const related = isRelatedToHighlight(error)}
             {@const selected = isSelected(error, idx)}
+            {@const fixes = getFixesFor(error)}
+            {@const hasFixes = fixes.length > 0}
+            {@const expanded = isFixesExpanded(error, idx)}
             <tr class:related={related && !selected}
                 class:selected-row={selected}
                 on:click={() => selectError(error, idx)}>
@@ -131,6 +180,26 @@
               </td>
               <td class="msg-col">
                 <div class="error-message">{error.message}</div>
+                {#if expanded && hasFixes}
+                  <div class="fixes-dropdown" on:click|stopPropagation>
+                    <div class="fixes-title">
+                      💡 快速修复建议:
+                    </div>
+                    {#each fixes as fix, fixIdx}
+                      <button
+                        class="fix-item"
+                        on:click={(e) => applyFix(fix, error, idx, e)}>
+                        <span class="fix-icon">🛠️</span>
+                        <div class="fix-content">
+                          <div class="fix-label">{fix.label}</div>
+                          {#if fix.description}
+                            <div class="fix-desc">{fix.description}</div>
+                          {/if}
+                        </div>
+                      </button>
+                    {/each}
+                  </div>
+                {/if}
               </td>
               <td class="types-col">
                 <div class="type-tags">
@@ -143,6 +212,22 @@
                     <span class="type-tag type-unknown">-</span>
                   {/if}
                 </div>
+              </td>
+              <td class="fix-col">
+                {#if hasFixes}
+                  <button
+                    class="fix-bulb-btn"
+                    class:active={expanded}
+                    on:click={(e) => toggleFixes(error, idx, e)}
+                    title="展开修复建议">
+                    💡
+                    {#if expanded}
+                      <span class="bulb-badge">{fixes.length}</span>
+                    {/if}
+                  </button>
+                {:else}
+                  <span class="no-fix-hint" title="暂无自动修复建议">—</span>
+                {/if}
               </td>
             </tr>
           {/each}
@@ -175,12 +260,12 @@
         </div>
       </div>
       <div class="detail-hint">
-        💡 点击行号可跳转到源码中的对应位置
+        💡 点击行号可跳转到源码中的对应位置，点击灯泡图标查看快速修复建议
       </div>
     </div>
   {:else if errors.length > 0}
     <div class="hint-card">
-      💡 点击上方表格中的任意一条错误，可跳转到源码中的对应位置
+      💡 点击上方表格中的任意一条错误，可跳转到源码中的对应位置。点击💡图标查看快速修复建议
     </div>
   {/if}
 </div>
@@ -324,6 +409,83 @@
     color: var(--color-text);
   }
 
+  .fixes-dropdown {
+    margin-top: 8px;
+    padding: 10px;
+    background: #fffbeb;
+    border: 1px solid #fbbf2455;
+    border-radius: 6px;
+    animation: fixes-slide-in 0.2s ease-out;
+  }
+
+  @keyframes fixes-slide-in {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .fixes-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: #92400e;
+    margin-bottom: 6px;
+  }
+
+  .fix-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    width: 100%;
+    padding: 7px 10px;
+    margin-bottom: 4px;
+    background: white;
+    border: 1px solid #fcd34d;
+    border-radius: 5px;
+    cursor: pointer;
+    text-align: left;
+    transition: all 0.15s;
+  }
+
+  .fix-item:hover {
+    background: #fef3c7;
+    border-color: #f59e0b;
+    transform: translateX(2px);
+  }
+
+  .fix-item:last-child {
+    margin-bottom: 0;
+  }
+
+  .fix-icon {
+    font-size: 13px;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+
+  .fix-content {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .fix-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #92400e;
+    line-height: 1.3;
+  }
+
+  .fix-desc {
+    font-size: 10px;
+    color: #a16207;
+    margin-top: 2px;
+    line-height: 1.3;
+  }
+
   .type-tags {
     display: flex;
     flex-wrap: wrap;
@@ -344,6 +506,52 @@
     background: var(--color-surface-alt);
     color: var(--color-text-muted);
     border-color: var(--color-border);
+  }
+
+  .fix-col {
+    text-align: center;
+    padding: 8px 4px !important;
+  }
+
+  .fix-bulb-btn {
+    position: relative;
+    padding: 4px 6px;
+    border: none;
+    background: rgba(251, 191, 36, 0.15);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.15s;
+    line-height: 1;
+  }
+
+  .fix-bulb-btn:hover {
+    background: rgba(251, 191, 36, 0.3);
+    transform: scale(1.1);
+  }
+
+  .fix-bulb-btn.active {
+    background: #fbbf24;
+    box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.25);
+  }
+
+  .bulb-badge {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    background: #dc2626;
+    color: white;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 1px 4px;
+    border-radius: 8px;
+    line-height: 1.2;
+  }
+
+  .no-fix-hint {
+    color: var(--color-text-muted);
+    font-size: 14px;
+    opacity: 0.5;
   }
 
   .empty-state {

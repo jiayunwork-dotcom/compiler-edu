@@ -4,6 +4,7 @@
   export let value = '';
   export let highlightRanges = [];
   export let errorRanges = [];
+  export let inlineTypeAnnotations = new Map();
   export let cursorLine = 1;
   export let cursorColumn = 1;
 
@@ -241,7 +242,38 @@
     return segments;
   }
 
+  function getLineAnnotation(lineNum) {
+    const anns = inlineTypeAnnotations.get(lineNum);
+    if (!anns || anns.length === 0) return null;
+    var annList = anns;
+    const parts = [];
+    for (const ann of annList) {
+      if (ann.kind === 'variable' || ann.kind === 'parameter') {
+        parts.push(`${ann.name}: ${ann.type}`);
+      } else if (ann.kind === 'call') {
+        parts.push(`${ann.name}()→${ann.type}`);
+      }
+    }
+    if (parts.length === 0) return null;
+    return '// : ' + parts.join(' | ');
+  }
+
   $: highlightedSegments = buildHighlightedSegments(value, highlightRanges, errorRanges);
+  $: displayLines = buildDisplayLines(value, highlightedSegments, inlineTypeAnnotations);
+
+  function buildDisplayLines(source, segments, annotations) {
+    const lines = source.split('\n');
+    const result = [];
+    for (let i = 0; i < lines.length; i++) {
+      const lineNum = i + 1;
+      result.push({
+        lineNum,
+        content: lines[i],
+        annotation: getLineAnnotation(lineNum)
+      });
+    }
+    return result;
+  }
 </script>
 
 <div class="code-editor-container" on:mousemove={handleMouseMove} on:mouseleave={handleMouseLeave}>
@@ -255,6 +287,16 @@
     <div class="code-highlight-layer">
       <pre><code>{#each highlightedSegments as seg}
 <span class="{seg.classes}">{seg.text}</span>{/each}</code></pre>
+    </div>
+
+    <div class="inline-annotations-layer">
+      <pre class="annotations-pre"><code>{#each displayLines as dl}
+<span class="annotation-line">
+  <span class="annotation-content-spacer">{dl.content || '\u00A0'}</span>
+  {#if dl.annotation}
+    <span class="inline-type-annotation">{dl.annotation}</span>
+  {/if}
+</span>{/each}</code></pre>
     </div>
 
     <textarea
@@ -346,6 +388,68 @@
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
   }
 
+  .inline-annotations-layer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    padding: 8px 10px;
+    pointer-events: none;
+    overflow: hidden;
+    z-index: 2;
+  }
+
+  .annotations-pre {
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    font-size: 13px;
+    line-height: 1.6;
+    white-space: pre;
+    word-wrap: normal;
+    overflow: visible;
+    color: transparent;
+  }
+
+  .annotations-pre code {
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    display: block;
+  }
+
+  .annotation-line {
+    display: block;
+    position: relative;
+    white-space: pre;
+  }
+
+  .annotation-content-spacer {
+    visibility: hidden;
+    white-space: pre;
+  }
+
+  .inline-type-annotation {
+    display: inline-block;
+    padding-left: 12px;
+    color: #94a3b8;
+    font-size: 11px;
+    font-weight: 500;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-style: normal;
+    visibility: visible !important;
+    opacity: 0.9;
+    letter-spacing: 0.1px;
+    white-space: nowrap;
+    position: absolute;
+    left: 100%;
+    top: 0;
+  }
+
+  .inline-type-annotation:hover {
+    color: #64748b;
+    opacity: 1;
+  }
+
   .code-textarea {
     position: absolute;
     top: 0;
@@ -361,7 +465,7 @@
     line-height: 1.6;
     resize: none;
     outline: none;
-    z-index: 2;
+    z-index: 3;
     caret-color: #4f46e5;
   }
 

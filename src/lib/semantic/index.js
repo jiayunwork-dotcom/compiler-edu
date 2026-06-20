@@ -1545,3 +1545,405 @@ export function findScopeAtLine(scopes, line) {
   }
   return best;
 }
+
+// ==================== Rename Refactoring ====================
+export function checkRenameConflict(symbol, newName, allScopes) {
+  if (!symbol || !symbol.scope) return { conflict: false };
+  const scope = symbol.scope;
+  if (scope.symbols.has(newName)) {
+    const existing = scope.symbols.get(newName);
+    if (existing.nameStart !== symbol.nameStart) {
+      return {
+        conflict: true,
+        message: `作用域"${scope.name}"中已存在符号"${newName}"（声明于第${existing.line}行）`,
+        existing
+      };
+    }
+  }
+  return { conflict: false };
+}
+
+export function applyRename(source, symbol, newName) {
+  const ranges = [];
+  ranges.push({ start: symbol.nameStart, end: symbol.nameEnd });
+  if (symbol.references) {
+    for (const ref of symbol.references) {
+      ranges.push({ start: ref.start, end: ref.end });
+    }
+  }
+  ranges.sort((a, b) => b.start - a.start);
+  let result = source;
+  for (const r of ranges) {
+    result = result.substring(0, r.start) + newName + result.substring(r.end);
+  }
+  return result;
+}
+
+// ==================== Quick Fix Suggestions ====================
+export function generateQuickFixes(error, ast, allSymbols, source) {
+  const fixes = [];
+  const msg = error.message || '';
+  const types = error.types || [];
+
+  if (msg.includes('不能将') && msg.includes('赋给') && msg.includes('类型变量')) {
+    const assignMatch = msg.match(/不能将(\w+)(?:类型的值)?(?:用于初始化)?赋给(\w+)类型变量\s*"([^"]+)"/);
+    if (assignMatch) {
+      const srcType = assignMatch[1];
+      const dstType = assignMatch[2];
+      const varName = assignMatch[3];
+      fixes.push({
+        id: 'add-cast',
+        label: `添加强制类型转换 (${dstType})`,
+        description: `在值前添加 (${dstType}) 进行强制转换`,
+        apply: () => applyAddCast(source, error, dstType)
+      });
+      const targetSym = allSymbols.find(s => s.name === varName);
+      if (targetSym && targetSym.kind === 'variable') {
+        fixes.push({
+          id: 'change-var-type',
+          label: `将变量声明改为${srcType}`,
+          description: `修改"${varName}"的声明类型为${srcType}`,
+          apply: () => applyChangeVarType(source, targetSym, srcType)
+        });
+      }
+    }
+  }
+
+  if (msg.includes('不能将') && msg.includes('用于初始化')) {
+    const initMatch = msg.match(/不能将(\w+)类型的值用于初始化(\w+)类型变量\s*"([^"]+)"/);
+    if (initMatch) {
+      const srcType = initMatch[1];
+      const dstType = initMatch[2];
+      const varName = initMatch[3];
+      fixes.push({
+        id: 'add-cast-init',
+        label: `添加强制类型转换 (${dstType})`,
+        description: `在初始化值前添加 (${dstType}) 进行强制转换`,
+        apply: () => applyAddCast(source, error, dstType)
+      });
+      const targetSym = allSymbols.find(s => s.name === varName);
+      if (targetSym && targetSym.kind === 'variable') {
+        fixes.push({
+          id: 'change-var-type-init',
+          label: `将变量声明改为${srcType}`,
+          description: `修改"${varName}"的声明类型为${srcType}`,
+          apply: () => applyChangeVarType(source, targetSym, srcType)
+        });
+      }
+    }
+  }
+
+  if (msg.includes('个参数类型不兼容')) {
+    const argMatch = msg.match(/第\s*(\d+)\s*个参数类型不兼容:\s*期望\s*(\w+)\s*，实际为\s*(\w+)/);
+    if (argMatch) {
+      const argIdx = parseInt(argMatch[1]) - 1;
+      const expectedType = argMatch[2];
+      const actualType = argMatch[3];
+      fixes.push({
+        id: 'add-cast-arg',
+        label: `添加类型转换 (${expectedType})`,
+        description: `在第${argIdx + 1}个参数前添加强制转换`,
+        apply: () => applyAddCast(source, error, expectedType)
+      });
+      const funcSym = allSymbols.find(s =>
+        s.kind === 'function' &&
+        s.declaration &&
+        s.declaration.params &&
+        s.declaration.params[argIdx]
+      );
+      if (funcSym && funcSym.declaration && funcSym.declaration.params) {
+        const paramNode = funcSym.declaration.params[argIdx];
+        if (paramNode) {
+          fixes.push({
+            id: 'change-param-type',
+            label: `修改函数声明的参数类型为${actualType}`,
+            description: `将第${argIdx + 1}个参数类型从${expectedType}改为${actualType}`,
+            apply: () => applyChangeParamType(source, paramNode, actualType)
+          });
+        }
+      }
+    }
+  }
+
+  if (msg.includes('算术运算符') && (msg.includes('左操作数') || msg.includes('右操作数'))) {
+    if (types.length >= 2) {
+      const badType = types.find(t => t !== 'int' && t !== 'float');
+      if (badType) {
+        fixes.push({
+          id: 'convert-operand-to-float',
+          label: `将操作数转换为float`,
+          description: `对操作数添加强制类型转换 (float)`,
+          apply: () => applyAddCast(source, error, 'float')
+        });
+      }
+    }
+  }
+
+  if (msg.includes('if条件必须是bool') || msg.includes('while条件必须是bool')) {
+    const condType = types[0];
+    if (condType && condType !== 'bool') {
+      fixes.push({
+        id: 'add-compare-zero',
+        label: `添加比较运算 "!= 0"`,
+        description: `将条件表达式改为 != 0 转换为布尔值`,
+        apply: () => applyAddCompare(source, error)
+      });
+    }
+  }
+
+  if (msg.includes('未定义的标识符')) {
+    const undefMatch = msg.match(/未定义的标识符\s*"([^"]+)"/);
+    if (undefMatch) {
+      const undefinedName = undefMatch[1];
+      fixes.push({
+        id: 'declare-variable',
+        label: `声明变量 int ${undefinedName}`,
+        description: `在当前位置之前声明变量`,
+        apply: () => applyDeclareVar(source, error, undefinedName, 'int')
+      });
+    }
+  }
+
+  if (msg.includes('返回值类型不兼容')) {
+    const retMatch = msg.match(/函数声明返回\s*(\w+)\s*，实际返回\s*(\w+)/);
+    if (retMatch) {
+      const declaredType = retMatch[1];
+      const actualType = retMatch[2];
+      fixes.push({
+        id: 'add-cast-return',
+        label: `添加返回值类型转换 (${declaredType})`,
+        description: `对返回值添加强制类型转换`,
+        apply: () => applyAddCast(source, error, declaredType)
+      });
+      fixes.push({
+        id: 'change-return-type',
+        label: `将函数返回类型改为${actualType}`,
+        description: `修改函数声明的返回类型`,
+        apply: () => applyChangeFunctionReturnType(source, error, ast, actualType)
+      });
+    }
+  }
+
+  return fixes;
+}
+
+function applyAddCast(source, error, castType) {
+  if (!error || error.start === undefined) return source;
+  const exprStart = error.start;
+  return source.substring(0, exprStart) + `(${castType})` + source.substring(exprStart);
+}
+
+function applyChangeVarType(source, targetSym, newType) {
+  if (!targetSym || !targetSym.declaration) return source;
+  const decl = targetSym.declaration;
+  const typeStart = decl.start;
+  const typeEnd = targetSym.nameStart;
+  const lineStart = source.lastIndexOf('\n', typeStart - 1) + 1;
+  const lineEnd = source.indexOf('\n', typeStart) === -1 ? source.length : source.indexOf('\n', typeStart);
+  const lineContent = source.substring(lineStart, lineEnd);
+  const typeMatch = lineContent.match(/^\s*(int|float|bool|void)/);
+  if (typeMatch) {
+    const actualStart = lineStart + typeMatch.index;
+    const actualEnd = actualStart + typeMatch[1].length;
+    return source.substring(0, actualStart) + newType + source.substring(actualEnd);
+  }
+  return source;
+}
+
+function applyChangeParamType(source, paramNode, newType) {
+  if (!paramNode || paramNode.start === undefined) return source;
+  const typeStart = paramNode.start;
+  const lineStart = source.lastIndexOf('\n', typeStart - 1) + 1;
+  const lineEnd = source.indexOf('\n', typeStart) === -1 ? source.length : source.indexOf('\n', typeStart);
+  const lineContent = source.substring(lineStart, lineEnd);
+  const typeMatch = lineContent.match(/(int|float|bool)/);
+  if (typeMatch) {
+    const actualStart = lineStart + typeMatch.index;
+    const actualEnd = actualStart + typeMatch[1].length;
+    return source.substring(0, actualStart) + newType + source.substring(actualEnd);
+  }
+  return source;
+}
+
+function applyAddCompare(source, error) {
+  if (!error || error.end === undefined) return source;
+  return source.substring(0, error.end) + ' != 0' + source.substring(error.end);
+}
+
+function applyDeclareVar(source, error, varName, varType) {
+  if (!error || error.start === undefined) return source;
+  const lineStart = source.lastIndexOf('\n', error.start - 1) + 1;
+  const whitespaceMatch = source.substring(lineStart, error.start).match(/^\s*/);
+  const indent = whitespaceMatch ? whitespaceMatch[0] : '';
+  return source.substring(0, lineStart) + `${indent}${varType} ${varName};\n` + source.substring(lineStart);
+}
+
+function applyChangeFunctionReturnType(source, error, ast, newType) {
+  if (!error || error.start === undefined || !ast) return source;
+  const errorLine = error.line || 1;
+  let targetFunc = null;
+  function findFunc(declarations) {
+    for (const decl of declarations) {
+      if (decl.type === NODE_TYPE.FUNC_DECL) {
+        const funcStart = decl.line;
+        const bodyEnd = decl.body ? decl.body.lineEnd : 99999;
+        if (errorLine >= funcStart && errorLine <= bodyEnd) {
+          targetFunc = decl;
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+  findFunc(ast.declarations || []);
+  if (targetFunc) {
+    const typeStart = targetFunc.start;
+    const lineContent = source.substring(source.lastIndexOf('\n', typeStart - 1) + 1, targetFunc.nameStart);
+    const typeMatch = lineContent.match(/(int|float|bool|void)/);
+    if (typeMatch) {
+      const actualStart = source.lastIndexOf('\n', typeStart - 1) + 1 + typeMatch.index;
+      const actualEnd = actualStart + typeMatch[1].length;
+      return source.substring(0, actualStart) + newType + source.substring(actualEnd);
+    }
+  }
+  return source;
+}
+
+// ==================== Variable Lifecycle ====================
+export function computeVariableLifecycles(allScopes, totalLines) {
+  const result = new Map();
+  for (const scope of allScopes) {
+    const vars = [];
+    scope.symbols.forEach((sym, name) => {
+      if (sym.kind === 'variable' || sym.kind === 'parameter') {
+        const declaredLine = sym.line;
+        let lastRefLine = null;
+        if (sym.references && sym.references.length > 0) {
+          lastRefLine = sym.references.reduce((max, r) => Math.max(max, r.line || 0), 0);
+        }
+        const isUnused = !lastRefLine || lastRefLine <= 0;
+        const scopeEnd = scope.lineEnd || totalLines;
+        const endLine = lastRefLine && lastRefLine > declaredLine
+          ? Math.min(lastRefLine, scopeEnd)
+          : declaredLine;
+        vars.push({
+          symbol: sym,
+          name,
+          dataType: sym.dataType,
+          kind: sym.kind,
+          declaredLine,
+          lastRefLine: lastRefLine || declaredLine,
+          isUnused,
+          startLine: declaredLine,
+          endLine
+        });
+      }
+    });
+    result.set(scope.id, vars);
+  }
+  return result;
+}
+
+// ==================== Inline Type Annotations ====================
+export function computeInlineTypeAnnotations(ast, nodeTypes, globalScope) {
+  const annotations = [];
+  function walkStmts(stmts, scope) {
+    if (!stmts) return;
+    for (const stmt of stmts) {
+      walkStmt(stmt, scope);
+    }
+  }
+  function walkStmt(node, scope) {
+    if (!node) return;
+    let stmtScope = scope;
+    if (node.type === NODE_TYPE.BLOCK) {
+      const blockScope = scope.children.find(c => c.line === node.line && c.kind === 'block') || scope;
+      stmtScope = blockScope;
+    }
+    switch (node.type) {
+      case NODE_TYPE.VAR_DECL:
+        annotations.push({
+          line: node.line,
+          kind: 'variable',
+          type: node.dataType,
+          name: node.name
+        });
+        if (node.initExpr) walkExpr(node.initExpr, stmtScope);
+        break;
+      case NODE_TYPE.FUNC_DECL:
+        const funcScope = globalScope.children.find(c => c.name === `函数 ${node.name}`);
+        if (funcScope && node.body) {
+          for (const p of node.params || []) {
+            if (p) {
+              annotations.push({
+                line: p.line,
+                kind: 'parameter',
+                type: p.dataType,
+                name: p.name
+              });
+            }
+          }
+          if (node.body && node.body.statements) {
+            walkStmts(node.body.statements, funcScope);
+          }
+        }
+        break;
+      case NODE_TYPE.BLOCK:
+        walkStmts(node.statements, stmtScope);
+        break;
+      case NODE_TYPE.IF_STMT:
+        if (node.condition) walkExpr(node.condition, stmtScope);
+        walkStmt(node.thenBranch, stmtScope);
+        walkStmt(node.elseBranch, stmtScope);
+        break;
+      case NODE_TYPE.WHILE_STMT:
+        if (node.condition) walkExpr(node.condition, stmtScope);
+        walkStmt(node.body, stmtScope);
+        break;
+      case NODE_TYPE.RETURN_STMT:
+        if (node.expr) walkExpr(node.expr, stmtScope);
+        break;
+      case NODE_TYPE.ASSIGN:
+        if (node.value) walkExpr(node.value, stmtScope);
+        break;
+      case NODE_TYPE.EXPR_STMT:
+        if (node.expr) walkExpr(node.expr, stmtScope);
+        break;
+    }
+  }
+  function walkExpr(node, scope) {
+    if (!node) return;
+    if (node.type === NODE_TYPE.CALL_EXPR) {
+      const callType = nodeTypes.get(node);
+      if (callType) {
+        annotations.push({
+          line: node.line,
+          kind: 'call',
+          type: callType,
+          name: node.callee,
+          start: node.start,
+          end: node.end
+        });
+      }
+      for (const arg of node.args || []) {
+        walkExpr(arg, scope);
+      }
+    } else if (node.type === NODE_TYPE.BINARY_EXPR) {
+      walkExpr(node.left, scope);
+      walkExpr(node.right, scope);
+    } else if (node.type === NODE_TYPE.UNARY_EXPR) {
+      walkExpr(node.operand, scope);
+    }
+  }
+  if (ast && ast.declarations) {
+    walkStmts(ast.declarations, globalScope);
+  }
+  const lineMap = new Map();
+  for (const ann of annotations) {
+    if (!lineMap.has(ann.line)) {
+      lineMap.set(ann.line, []);
+    }
+    lineMap.get(ann.line).push(ann);
+  }
+  return lineMap;
+}
