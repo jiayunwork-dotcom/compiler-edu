@@ -1,7 +1,3 @@
-import { regexToNFA } from '../automata/regexToNFA.js';
-import { nfaToDFA } from '../automata/nfaToDFA.js';
-import { getAllStates } from '../automata/utils.js';
-
 export const TOKEN_TYPES = {
   KEYWORD: '关键字',
   IDENTIFIER: '标识符',
@@ -11,36 +7,33 @@ export const TOKEN_TYPES = {
   STRING: '字符串'
 };
 
+function escapeRegExp(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function buildRegexForRule(rule) {
+  try {
+    return new RegExp('^' + rule.regex);
+  } catch (e) {
+    console.error('无效正则:', rule.regex, e);
+    return null;
+  }
+}
+
 export const DEFAULT_RULES = [
-  { regex: 'if|else|while|for|return|int|float|void', type: TOKEN_TYPES.KEYWORD, label: 'if/else/while/for/return/int/float/void' },
-  { regex: '[a-zA-Z][a-zA-Z0-9]*', type: TOKEN_TYPES.IDENTIFIER, label: '标识符' },
+  { regex: 'if|else|while|for|return|int|float|void|true|false|null', type: TOKEN_TYPES.KEYWORD, label: '关键字' },
+  { regex: '[a-zA-Z_][a-zA-Z_0-9]*', type: TOKEN_TYPES.IDENTIFIER, label: '标识符' },
   { regex: '[0-9]+(\\.[0-9]+)?', type: TOKEN_TYPES.NUMBER, label: '数字' },
-  { regex: '\\+|\\-|\\*|/|=|==|!=|<|>|<=|>=|&&|\\|\\||!', type: TOKEN_TYPES.OPERATOR, label: '运算符' },
-  { regex: '\\(|\\)|\\{|\\}|;|,|\\[|\\]', type: TOKEN_TYPES.SEPARATOR, label: '分隔符' },
+  { regex: '\\+|-|\\*|/|=|==|!=|<|>|<=|>=|&&|\\|\\||!', type: TOKEN_TYPES.OPERATOR, label: '运算符' },
+  { regex: '\\(|\\)|\\{|\\}|;|,|\\[|\\]|:|\\.', type: TOKEN_TYPES.SEPARATOR, label: '分隔符' },
   { regex: '"[^"]*"', type: TOKEN_TYPES.STRING, label: '字符串' }
 ];
 
 export function tokenize(source, rules = DEFAULT_RULES) {
-  const combinedDFA = buildCombinedDFA(rules);
-  return runLexer(source, combinedDFA, rules);
-}
-
-function buildCombinedDFA(rules) {
-  const individualDFAs = rules.map(rule => {
-    const nfa = regexToNFA(rule.regex);
-    for (const state of getAllStates(nfa.start)) {
-      if (state.isAccepting) {
-        state.acceptLabel = rule.type;
-      }
-    }
-    const { dfa } = nfaToDFA(nfa);
-    return { dfa, type: rule.type };
-  });
+  const compiledRules = rules
+    .map(r => ({ ...r, regex: buildRegexForRule(r) }))
+    .filter(r => r.regex !== null);
   
-  return individualDFAs;
-}
-
-function runLexer(source, dfas, rules) {
   const tokens = [];
   let pos = 0;
   const lineStarts = [0];
@@ -59,41 +52,21 @@ function runLexer(source, dfas, rules) {
     let longestLength = 0;
     let matchedType = null;
     
-    for (const { dfa, type } of dfas) {
-      let currentState = dfa;
-      let matchEnd = pos;
-      let acceptEnd = -1;
-      
-      if (currentState.isAccepting) {
-        acceptEnd = pos;
-      }
-      
-      while (matchEnd < source.length) {
-        const ch = source[matchEnd];
-        if (currentState.transitions.has(ch)) {
-          currentState = [...currentState.transitions.get(ch)][0];
-          matchEnd++;
-          if (currentState.isAccepting) {
-            acceptEnd = matchEnd;
-          }
-        } else {
-          break;
-        }
-      }
-      
-      if (acceptEnd > pos && acceptEnd - pos > longestLength) {
-        longestLength = acceptEnd - pos;
-        longestMatch = source.substring(pos, acceptEnd);
-        matchedType = type;
+    for (const rule of compiledRules) {
+      const match = source.substring(pos).match(rule.regex);
+      if (match && match[0].length > longestLength) {
+        longestLength = match[0].length;
+        longestMatch = match[0];
+        matchedType = rule.type;
       }
     }
     
+    const lineIdx = lineStarts.findIndex((start, idx) => 
+      idx + 1 >= lineStarts.length || pos < lineStarts[idx + 1]
+    );
+    const col = pos - lineStarts[lineIdx] + 1;
+    
     if (longestMatch) {
-      const lineIdx = lineStarts.findIndex((start, idx) => 
-        idx + 1 >= lineStarts.length || pos < lineStarts[idx + 1]
-      );
-      const col = pos - lineStarts[lineIdx] + 1;
-      
       tokens.push({
         type: matchedType,
         value: longestMatch,
@@ -104,10 +77,6 @@ function runLexer(source, dfas, rules) {
       });
       pos += longestLength;
     } else {
-      const lineIdx = lineStarts.findIndex((start, idx) => 
-        idx + 1 >= lineStarts.length || pos < lineStarts[idx + 1]
-      );
-      const col = pos - lineStarts[lineIdx] + 1;
       tokens.push({
         type: 'ERROR',
         value: source[pos],
@@ -124,32 +93,26 @@ function runLexer(source, dfas, rules) {
 }
 
 export function createLexerStepper(source, rules = DEFAULT_RULES) {
-  const dfas = rules.map(rule => {
-    const nfa = regexToNFA(rule.regex);
-    for (const state of getAllStates(nfa.start)) {
-      if (state.isAccepting) {
-        state.acceptLabel = rule.type;
-      }
-    }
-    const { dfa } = nfaToDFA(nfa);
-    return { dfa, type: rule.type };
-  });
-  
-  const states = dfas.map(({ dfa, type }) => ({
-    currentState: dfa,
-    currentLexeme: '',
-    isActive: true,
-    acceptState: dfa.isAccepting,
-    type
-  }));
+  const compiledRules = rules
+    .map(r => ({ ...r, regex: buildRegexForRule(r) }))
+    .filter(r => r.regex !== null);
   
   return {
     pos: 0,
     source,
-    states,
-    dfas,
-    rules,
-    history: []
+    rules: compiledRules,
+    originalRules: rules,
+    tokens: [],
+    lastToken: null,
+    currentLexeme: '',
+    activeStates: compiledRules.map(r => ({
+      rule: r,
+      currentPos: 0,
+      currentMatch: '',
+      isActive: true,
+      lastAcceptPos: -1,
+      lastAcceptMatch: ''
+    }))
   };
 }
 
@@ -157,75 +120,77 @@ export function stepLexer(stepper) {
   if (stepper.pos >= stepper.source.length) return stepper;
   
   const ch = stepper.source[stepper.pos];
-  const newStates = stepper.states.map(state => {
+  
+  if (/\s/.test(ch)) {
+    stepper.pos++;
+    return stepper;
+  }
+  
+  const newStates = stepper.activeStates.map(state => {
     if (!state.isActive) return state;
     
-    const newState = { ...state };
-    if (state.currentState.transitions.has(ch)) {
-      newState.currentState = [...state.currentState.transitions.get(ch)][0];
-      newState.currentLexeme += ch;
-      newState.acceptState = newState.currentState.isAccepting;
-    } else {
+    const newMatch = state.currentMatch + ch;
+    const newState = { ...state, currentMatch: newMatch };
+    
+    if (state.rule.regex.test(newMatch)) {
+      newState.lastAcceptPos = stepper.pos + 1;
+      newState.lastAcceptMatch = newMatch;
+    }
+    
+    const fullMatch = state.rule.regex.test(newMatch);
+    const canContinue = stepper.source.substring(stepper.pos + 1).match(
+      new RegExp('^' + state.originalRules[stepper.activeStates.indexOf(state)].regex)
+    ) !== null || state.rule.regex.test(newMatch);
+    
+    if (!fullMatch && !canContinue) {
       newState.isActive = false;
     }
+    
     return newState;
   });
   
-  const anyActive = newStates.some(s => s.isActive);
-  let result;
+  stepper.activeStates = newStates;
+  stepper.currentLexeme += ch;
+  stepper.pos++;
   
-  if (!anyActive) {
+  const anyActive = newStates.some(s => s.isActive);
+  
+  if (!anyActive || stepper.pos >= stepper.source.length) {
     let bestMatch = null;
     let bestLength = 0;
     let bestType = null;
     
-    for (const state of stepper.states) {
-      if (state.acceptState && state.currentLexeme.length > bestLength) {
-        bestLength = state.currentLexeme.length;
-        bestMatch = state.currentLexeme;
-        bestType = state.type;
+    for (const state of newStates) {
+      if (state.lastAcceptMatch && state.lastAcceptMatch.length > bestLength) {
+        bestLength = state.lastAcceptMatch.length;
+        bestMatch = state.lastAcceptMatch;
+        bestType = state.rule.type;
       }
     }
     
+    if (!bestMatch && stepper.currentLexeme.length > 0) {
+      bestMatch = stepper.currentLexeme[0];
+      bestLength = 1;
+      bestType = 'ERROR';
+      stepper.pos -= (stepper.currentLexeme.length - 1);
+    }
+    
     if (bestMatch) {
-      result = {
-        ...stepper,
-        states: stepper.dfas.map(({ dfa, type }) => ({
-          currentState: dfa,
-          currentLexeme: '',
-          isActive: true,
-          acceptState: dfa.isAccepting,
-          type
-        })),
-        pos: stepper.pos,
-        lastToken: { type: bestType, value: bestMatch, length: bestLength }
-      };
-      result.pos -= (bestLength - 1);
-      return stepLexer(result);
-    } else {
-      const resetStates = stepper.dfas.map(({ dfa, type }) => ({
-        currentState: dfa,
-        currentLexeme: '',
+      const lineIdx = Math.floor(Math.log(stepper.pos) / Math.log(10));
+      stepper.lastToken = { type: bestType, value: bestMatch, length: bestLength };
+      stepper.tokens.push({ type: bestType, value: bestMatch });
+      
+      stepper.activeStates = stepper.rules.map(r => ({
+        rule: r,
+        currentPos: 0,
+        currentMatch: '',
         isActive: true,
-        acceptState: dfa.isAccepting,
-        type
+        lastAcceptPos: -1,
+        lastAcceptMatch: ''
       }));
-      if (resetStates[0].currentState.transitions.has(ch)) {
-        resetStates[0].currentState = [...resetStates[0].currentState.transitions.get(ch)][0];
-        resetStates[0].currentLexeme = ch;
-        resetStates[0].acceptState = resetStates[0].currentState.isAccepting;
-      }
-      return {
-        ...stepper,
-        pos: stepper.pos + 1,
-        states: resetStates
-      };
+      stepper.currentLexeme = '';
     }
   }
   
-  return {
-    ...stepper,
-    pos: stepper.pos + 1,
-    states: newStates
-  };
+  return stepper;
 }

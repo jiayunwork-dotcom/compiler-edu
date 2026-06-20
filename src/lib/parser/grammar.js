@@ -6,7 +6,7 @@ export function parseGrammar(text) {
   const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
   
   for (const line of lines) {
-    const arrowMatch = line.match(/^([A-Za-z_][A-Za-z_0-9]*)\s*(?:→|->|:|::=)\s*(.+)$/);
+    const arrowMatch = line.match(/^([A-Za-z_][A-Za-z_0-9']*)\s*(?:→|->|:|::=)\s*(.+)$/);
     if (!arrowMatch) continue;
     
     const nonTerminal = arrowMatch[1];

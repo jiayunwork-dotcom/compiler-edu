@@ -187,7 +187,7 @@ export function buildLR1Table(states, gotos, augmented, originalStart) {
         if (terminals.includes(A) || A === EOF) {
           const j = gotos[i]?.[A];
           if (j !== undefined) {
-            action[i][A].push({ type: 'shift', target: j });
+            addUniqueAction(action[i][A], { type: 'shift', target: j });
           }
         }
       }
@@ -195,14 +195,14 @@ export function buildLR1Table(states, gotos, augmented, originalStart) {
       if (item.dot >= item.body.length) {
         if (item.head === augmented[0].head) {
           if (item.lookahead.includes(EOF)) {
-            action[i][EOF].push({ type: 'accept' });
+            addUniqueAction(action[i][EOF], { type: 'accept' });
           }
         } else {
           const prodIdx = augmented.findIndex(p =>
             p.head === item.head && arraysEqual(p.body, item.body)
           );
           for (const la of item.lookahead) {
-            action[i][la].push({ type: 'reduce', production: prodIdx, head: item.head, body: item.body });
+            addUniqueAction(action[i][la], { type: 'reduce', production: prodIdx, head: item.head, body: item.body });
           }
         }
       }
@@ -240,6 +240,21 @@ function arraysEqual(a, b) {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
   return true;
+}
+
+function actionsEqual(a, b) {
+  if (a.type !== b.type) return false;
+  if (a.type === 'shift') return a.target === b.target;
+  if (a.type === 'reduce') return a.production === b.production;
+  if (a.type === 'accept') return true;
+  return false;
+}
+
+function addUniqueAction(arr, action) {
+  for (const existing of arr) {
+    if (actionsEqual(existing, action)) return;
+  }
+  arr.push(action);
 }
 
 export function simulateLR1(input, table, augmented) {
